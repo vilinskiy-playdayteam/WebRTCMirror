@@ -72,7 +72,7 @@ if (is_ios || is_mac) {
       ]
     }
 
-    if (use_metal_framework && (is_mac || (is_ios && current_cpu == "arm64”))) {
+    if (use_metal_framework && (is_mac || (is_ios && current_cpu == "arm64"))) {
       sources += [
         "objc/Framework/Classes/Metal/RTCMTLI420Renderer.h",
         "objc/Framework/Classes/Metal/RTCMTLI420Renderer.mm",
@@ -95,7 +95,7 @@ if (is_ios || is_mac) {
     }
 
     libs = [ "AVFoundation.framework" ]
-    if (use_metal_framework && (is_mac || (is_ios && current_cpu == "arm64”))) {
+    if (use_metal_framework && (is_mac || (is_ios && current_cpu == "arm64"))) {
       libs += [
         "CoreVideo.framework",
         "Metal.framework",
