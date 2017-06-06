@@ -472,8 +472,6 @@
   [RTCDispatcher dispatchAsyncOnType:RTCDispatcherTypeCaptureSession
                                block:^{
                                    AVCaptureConnection *connection = [self.videoDataOutput connectionWithMediaType:AVMediaTypeVideo];
-                                   connection.enabled = NO;
-
                                    [_captureSession beginConfiguration];
                                    AVCaptureDeviceInput *oldInput = _backCameraInput;
                                    AVCaptureDeviceInput *newInput = _frontCameraInput;
@@ -499,15 +497,13 @@
                                    webrtc::SetFormatForCaptureDevice(
                                        newDevice, _captureSession, *format);
                                    [_captureSession commitConfiguration];
-
-                                   connection.enabled = YES;
                                }];
 }
 
 - (void)updateCameraRotation {
 #if TARGET_OS_IPHONE
     //Use default portrait for back camera and portrait upside down for front
-    _rotation = self.useBackCamera ? webrtc::kVideoRotation_90 : webrtc::kVideoRotation_270;
+    _rotation = _capturer->GetUseBackCamera() ? webrtc::kVideoRotation_90 : webrtc::kVideoRotation_270;
 #else
     // No rotation on Mac.
                         _rotation = webrtc::kVideoRotation_0;
@@ -517,7 +513,7 @@
 - (void)updateMirroring {
     AVCaptureConnection *connection = [self.videoDataOutput connectionWithMediaType:AVMediaTypeVideo];
     connection.automaticallyAdjustsVideoMirroring = NO;
-    connection.videoMirrored = !self.useBackCamera;
+    connection.videoMirrored = !_capturer->GetUseBackCamera();
 }
 
 @end
