@@ -471,6 +471,8 @@
 - (void)updateSessionInputForUseBackCamera:(BOOL)useBackCamera {
   [RTCDispatcher dispatchAsyncOnType:RTCDispatcherTypeCaptureSession
                                block:^{
+                                   AVCaptureConnection *connection = [self.videoDataOutput connectionWithMediaType:AVMediaTypeVideo];
+                                   connection.enabled = NO;
                                    [_captureSession beginConfiguration];
                                    AVCaptureDeviceInput *oldInput = _backCameraInput;
                                    AVCaptureDeviceInput *newInput = _frontCameraInput;
@@ -496,6 +498,7 @@
                                    webrtc::SetFormatForCaptureDevice(
                                        newDevice, _captureSession, *format);
                                    [_captureSession commitConfiguration];
+                                   connection.enabled = YES;
                                }];
 }
 
