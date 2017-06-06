@@ -471,7 +471,6 @@
 - (void)updateSessionInputForUseBackCamera:(BOOL)useBackCamera {
   [RTCDispatcher dispatchAsyncOnType:RTCDispatcherTypeCaptureSession
                                block:^{
-                                   AVCaptureConnection *connection = [self.videoDataOutput connectionWithMediaType:AVMediaTypeVideo];
                                    [_captureSession beginConfiguration];
                                    AVCaptureDeviceInput *oldInput = _backCameraInput;
                                    AVCaptureDeviceInput *newInput = _frontCameraInput;
