@@ -18,7 +18,6 @@
 #include "webrtc/base/constructormagic.h"
 #include "webrtc/base/logging.h"
 #include "webrtc/base/trace_event.h"
-#include "webrtc/call/call.h"
 #include "webrtc/common_types.h"
 #include "webrtc/logging/rtc_event_log/rtc_event_log.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/app.h"
@@ -100,8 +99,7 @@ class PacketContainer : public rtcp::CompoundPacket,
     if (transport_->SendRtcp(data, length)) {
       bytes_sent_ += length;
       if (event_log_) {
-        event_log_->LogRtcpPacket(kOutgoingPacket, MediaType::ANY, data,
-                                  length);
+        event_log_->LogRtcpPacket(kOutgoingPacket, data, length);
       }
     }
   }
@@ -987,8 +985,7 @@ bool RTCPSender::SendFeedbackPacket(const rtcp::TransportFeedback& packet) {
     void OnPacketReady(uint8_t* data, size_t length) override {
       if (transport_->SendRtcp(data, length)) {
         if (event_log_) {
-          event_log_->LogRtcpPacket(kOutgoingPacket, MediaType::ANY, data,
-                                    length);
+          event_log_->LogRtcpPacket(kOutgoingPacket, data, length);
         }
       } else {
         send_failure_ = true;

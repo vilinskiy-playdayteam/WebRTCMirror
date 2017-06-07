@@ -15,11 +15,11 @@
 #include "webrtc/base/rate_limiter.h"
 #include "webrtc/logging/rtc_event_log/mock/mock_rtc_event_log.h"
 #include "webrtc/modules/rtp_rtcp/include/rtp_cvo.h"
+#include "webrtc/modules/rtp_rtcp/include/rtp_header_extension_map.h"
 #include "webrtc/modules/rtp_rtcp/include/rtp_header_parser.h"
 #include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_format_video_generic.h"
-#include "webrtc/modules/rtp_rtcp/source/rtp_header_extension.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_packet_to_send.h"
@@ -464,7 +464,7 @@ TEST_P(RtpSenderTest, TrafficSmoothingWithExtensions) {
   EXPECT_CALL(mock_paced_sender_, InsertPacket(RtpPacketSender::kNormalPriority,
                                                kSsrc, kSeqNum, _, _, _));
   EXPECT_CALL(mock_rtc_event_log_,
-              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _, _));
+              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _));
 
   rtp_sender_->SetStorePacketsStatus(true, 10);
   EXPECT_EQ(0, rtp_sender_->RegisterRtpHeaderExtension(
@@ -509,7 +509,7 @@ TEST_P(RtpSenderTest, TrafficSmoothingRetransmits) {
   EXPECT_CALL(mock_paced_sender_, InsertPacket(RtpPacketSender::kNormalPriority,
                                                kSsrc, kSeqNum, _, _, _));
   EXPECT_CALL(mock_rtc_event_log_,
-              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _, _));
+              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _));
 
   rtp_sender_->SetStorePacketsStatus(true, 10);
   EXPECT_EQ(0, rtp_sender_->RegisterRtpHeaderExtension(
@@ -563,7 +563,7 @@ TEST_P(RtpSenderTest, SendPadding) {
   EXPECT_CALL(mock_paced_sender_, InsertPacket(RtpPacketSender::kNormalPriority,
                                                kSsrc, kSeqNum, _, _, _));
   EXPECT_CALL(mock_rtc_event_log_,
-              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _, _))
+              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _))
       .Times(1 + 4 + 1);
 
   uint16_t seq_num = kSeqNum;
@@ -764,7 +764,7 @@ TEST_P(RtpSenderTest, SendRedundantPayloads) {
               InsertPacket(RtpPacketSender::kNormalPriority, kSsrc, _, _, _, _))
       .Times(kNumPayloadSizes);
   EXPECT_CALL(mock_rtc_event_log_,
-              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _, _))
+              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _))
       .Times(kNumPayloadSizes);
 
   // Send 10 packets of increasing size.
@@ -778,7 +778,7 @@ TEST_P(RtpSenderTest, SendRedundantPayloads) {
   }
 
   EXPECT_CALL(mock_rtc_event_log_,
-              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _, _))
+              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _))
       .Times(::testing::AtLeast(4));
 
   // The amount of padding to send it too small to send a payload packet.
@@ -843,8 +843,10 @@ TEST_P(RtpSenderTest, SendFlexfecPackets) {
   constexpr uint32_t kMediaSsrc = 1234;
   constexpr uint32_t kFlexfecSsrc = 5678;
   const std::vector<RtpExtension> kNoRtpExtensions;
+  const std::vector<RtpExtensionSize> kNoRtpExtensionSizes;
   FlexfecSender flexfec_sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
-                               kNoRtpExtensions, &fake_clock_);
+                               kNoRtpExtensions, kNoRtpExtensionSizes,
+                               nullptr /* rtp_state */, &fake_clock_);
 
   // Reset |rtp_sender_| to use FlexFEC.
   rtp_sender_.reset(new RTPSender(
@@ -873,7 +875,7 @@ TEST_P(RtpSenderTest, SendFlexfecPackets) {
       .WillOnce(testing::SaveArg<2>(&flexfec_seq_num));
   SendGenericPayload();
   EXPECT_CALL(mock_rtc_event_log_,
-              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _, _))
+              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _))
       .Times(2);
   EXPECT_TRUE(rtp_sender_->TimeToSendPacket(kMediaSsrc, kSeqNum,
                                             fake_clock_.TimeInMilliseconds(),
@@ -898,8 +900,10 @@ TEST_P(RtpSenderTestWithoutPacer, SendFlexfecPackets) {
   constexpr uint32_t kMediaSsrc = 1234;
   constexpr uint32_t kFlexfecSsrc = 5678;
   const std::vector<RtpExtension> kNoRtpExtensions;
+  const std::vector<RtpExtensionSize> kNoRtpExtensionSizes;
   FlexfecSender flexfec_sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
-                               kNoRtpExtensions, &fake_clock_);
+                               kNoRtpExtensions, kNoRtpExtensionSizes,
+                               nullptr /* rtp_state */, &fake_clock_);
 
   // Reset |rtp_sender_| to use FlexFEC.
   rtp_sender_.reset(new RTPSender(false, &fake_clock_, &transport_, nullptr,
@@ -919,7 +923,7 @@ TEST_P(RtpSenderTestWithoutPacer, SendFlexfecPackets) {
   rtp_sender_->SetFecParameters(params, params);
 
   EXPECT_CALL(mock_rtc_event_log_,
-              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _, _))
+              LogRtpHeader(PacketDirection::kOutgoingPacket, _, _, _))
       .Times(2);
   SendGenericPayload();
   ASSERT_EQ(2, transport_.packets_sent());
@@ -937,8 +941,10 @@ TEST_P(RtpSenderTest, FecOverheadRate) {
   constexpr uint32_t kMediaSsrc = 1234;
   constexpr uint32_t kFlexfecSsrc = 5678;
   const std::vector<RtpExtension> kNoRtpExtensions;
+  const std::vector<RtpExtensionSize> kNoRtpExtensionSizes;
   FlexfecSender flexfec_sender(kFlexfecPayloadType, kFlexfecSsrc, kMediaSsrc,
-                               kNoRtpExtensions, &fake_clock_);
+                               kNoRtpExtensions, kNoRtpExtensionSizes,
+                               nullptr /* rtp_state */, &fake_clock_);
 
   // Reset |rtp_sender_| to use FlexFEC.
   rtp_sender_.reset(new RTPSender(

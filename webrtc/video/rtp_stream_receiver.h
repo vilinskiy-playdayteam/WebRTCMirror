@@ -56,6 +56,7 @@ class VideoReceiver;
 }  // namespace vcm
 
 class RtpStreamReceiver : public RtpData,
+                          public RecoveredPacketReceiver,
                           public RtpFeedback,
                           public VCMFrameTypeCallback,
                           public VCMPacketRequestCallback,
@@ -102,7 +103,8 @@ class RtpStreamReceiver : public RtpData,
   int32_t OnReceivedPayloadData(const uint8_t* payload_data,
                                 size_t payload_size,
                                 const WebRtcRTPHeader* rtp_header) override;
-  bool OnRecoveredPacket(const uint8_t* packet, size_t packet_length) override;
+  // Implements RecoveredPacketReceiver.
+  void OnRecoveredPacket(const uint8_t* packet, size_t packet_length) override;
 
   // Implements RtpFeedback.
   int32_t OnInitializeDecoder(int8_t payload_type,
@@ -135,15 +137,18 @@ class RtpStreamReceiver : public RtpData,
 
   void OnRttUpdate(int64_t avg_rtt_ms, int64_t max_rtt_ms) override;
 
+  rtc::Optional<int64_t> LastReceivedPacketMs() const;
+  rtc::Optional<int64_t> LastReceivedKeyframePacketMs() const;
+
  private:
   bool AddReceiveCodec(const VideoCodec& video_codec);
-  bool ReceivePacket(const uint8_t* packet,
+  void ReceivePacket(const uint8_t* packet,
                      size_t packet_length,
                      const RTPHeader& header,
                      bool in_order);
   // Parses and handles for instance RTX and RED headers.
   // This function assumes that it's being called from only one thread.
-  bool ParseAndHandleEncapsulatingHeader(const uint8_t* packet,
+  void ParseAndHandleEncapsulatingHeader(const uint8_t* packet,
                                          size_t packet_length,
                                          const RTPHeader& header);
   void NotifyReceiverOfFecPacket(const RTPHeader& header);
@@ -192,6 +197,8 @@ class RtpStreamReceiver : public RtpData,
   // Maps a payload type to a map of out-of-band supplied codec parameters.
   std::map<uint8_t, std::map<std::string, std::string>> pt_codec_params_;
   int16_t last_payload_type_ = -1;
+
+  bool has_received_frame_;
 };
 
 }  // namespace webrtc

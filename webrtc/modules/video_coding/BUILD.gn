@@ -122,6 +122,8 @@ rtc_static_library("video_coding_utility") {
     "utility/quality_scaler.h",
     "utility/vp8_header_parser.cc",
     "utility/vp8_header_parser.h",
+    "utility/vp9_uncompressed_header_parser.cc",
+    "utility/vp9_uncompressed_header_parser.h",
   ]
 
   if (!build_with_chromium && is_clang) {
@@ -231,6 +233,7 @@ rtc_static_library("webrtc_vp8") {
     "../..:webrtc_common",
     "../../api/video_codecs:video_codecs_api",
     "../../base:rtc_base_approved",
+    "../../base:rtc_task_queue",
     "../../common_video",
     "../../system_wrappers",
   ]
@@ -376,7 +379,7 @@ if (rtc_include_tests) {
     if (is_ios || is_mac) {
       deps += [
         "../../media:rtc_media_base",
-        "../../sdk:webrtc_h264_video_toolbox",
+        "../../sdk:objc_videotoolbox",
       ]
     }
   }

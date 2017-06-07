@@ -22,13 +22,14 @@
 #include "webrtc/base/asyncinvoker.h"
 #include "webrtc/base/criticalsection.h"
 #include "webrtc/base/networkroute.h"
+#include "webrtc/base/optional.h"
 #include "webrtc/base/thread_annotations.h"
 #include "webrtc/base/thread_checker.h"
-#include "webrtc/media/base/videosinkinterface.h"
-#include "webrtc/media/base/videosourceinterface.h"
 #include "webrtc/call/call.h"
 #include "webrtc/call/flexfec_receive_stream.h"
 #include "webrtc/media/base/mediaengine.h"
+#include "webrtc/media/base/videosinkinterface.h"
+#include "webrtc/media/base/videosourceinterface.h"
 #include "webrtc/media/engine/webrtcvideodecoderfactory.h"
 #include "webrtc/media/engine/webrtcvideoencoderfactory.h"
 #include "webrtc/video_receive_stream.h"
@@ -81,15 +82,12 @@ class DefaultUnsignalledSsrcHandler : public UnsignalledSsrcHandler {
                            uint32_t ssrc) override;
 
   rtc::VideoSinkInterface<webrtc::VideoFrame>* GetDefaultSink() const;
-  void SetDefaultSink(VideoMediaChannel* channel,
+  void SetDefaultSink(WebRtcVideoChannel2* channel,
                       rtc::VideoSinkInterface<webrtc::VideoFrame>* sink);
-
-  uint32_t default_recv_ssrc() const { return default_recv_ssrc_; }
 
   virtual ~DefaultUnsignalledSsrcHandler() = default;
 
  private:
-  uint32_t default_recv_ssrc_;
   rtc::VideoSinkInterface<webrtc::VideoFrame>* default_sink_;
 };
 
@@ -162,6 +160,7 @@ class WebRtcVideoChannel2 : public VideoMediaChannel, public webrtc::Transport {
   bool RemoveRecvStream(uint32_t ssrc) override;
   bool SetSink(uint32_t ssrc,
                rtc::VideoSinkInterface<webrtc::VideoFrame>* sink) override;
+  void FillBitrateInfo(BandwidthEstimationInfo* bwe_info) override;
   bool GetStats(VideoMediaInfo* info) override;
 
   void OnPacketReceived(rtc::CopyOnWriteBuffer* packet,
@@ -177,6 +176,8 @@ class WebRtcVideoChannel2 : public VideoMediaChannel, public webrtc::Transport {
   // Implemented for VideoMediaChannelTest.
   bool sending() const { return sending_; }
 
+  rtc::Optional<uint32_t> GetDefaultReceiveStreamSsrc();
+
   // AdaptReason is used for expressing why a WebRtcVideoSendStream request
   // a lower input frame size than the currently configured camera input frame
   // size. There can be more than one reason OR:ed together.
@@ -191,8 +192,15 @@ class WebRtcVideoChannel2 : public VideoMediaChannel, public webrtc::Transport {
   struct VideoCodecSettings {
     VideoCodecSettings();
 
+    // Checks if all members of |*this| are equal to the corresponding members
+    // of |other|.
     bool operator==(const VideoCodecSettings& other) const;
     bool operator!=(const VideoCodecSettings& other) const;
+
+    // Checks if all members of |a|, except |flexfec_payload_type|, are equal
+    // to the corresponding members of |b|.
+    static bool EqualsDisregardingFlexfec(const VideoCodecSettings& a,
+                                          const VideoCodecSettings& b);
 
     VideoCodec codec;
     webrtc::UlpfecConfig ulpfec;
@@ -213,6 +221,10 @@ class WebRtcVideoChannel2 : public VideoMediaChannel, public webrtc::Transport {
     // These optionals are unset if not changed.
     rtc::Optional<std::vector<VideoCodecSettings>> codec_settings;
     rtc::Optional<std::vector<webrtc::RtpExtension>> rtp_header_extensions;
+    // Keep track of the FlexFEC payload type separately from |codec_settings|.
+    // This allows us to recreate the FlexfecReceiveStream separately from the
+    // VideoReceiveStream when the FlexFEC payload type is changed.
+    rtc::Optional<int> flexfec_payload_type;
   };
 
   bool GetChangedSendParameters(const VideoSendParameters& params,
@@ -273,7 +285,7 @@ class WebRtcVideoChannel2 : public VideoMediaChannel, public webrtc::Transport {
 
     const std::vector<uint32_t>& GetSsrcs() const;
     VideoSenderInfo GetVideoSenderInfo(bool log_stats);
-    void FillBandwidthEstimationInfo(BandwidthEstimationInfo* bwe_info);
+    void FillBitrateInfo(BandwidthEstimationInfo* bwe_info);
 
    private:
     // Parameters needed to reconstruct the underlying stream.
@@ -407,10 +419,12 @@ class WebRtcVideoChannel2 : public VideoMediaChannel, public webrtc::Transport {
       bool external;
     };
 
-    void RecreateWebRtcStream();
+    void RecreateWebRtcVideoStream();
+    void MaybeRecreateWebRtcFlexfecStream();
 
     void ConfigureCodecs(const std::vector<VideoCodecSettings>& recv_codecs,
                          std::vector<AllocatedDecoder>* old_codecs);
+    void ConfigureFlexfecCodec(int flexfec_payload_type);
     AllocatedDecoder CreateOrReuseVideoDecoder(
         std::vector<AllocatedDecoder>* old_decoder,
         const VideoCodec& codec);
@@ -460,8 +474,9 @@ class WebRtcVideoChannel2 : public VideoMediaChannel, public webrtc::Transport {
   rtc::Optional<VideoCodecSettings> SelectSendVideoCodec(
       const std::vector<VideoCodecSettings>& remote_mapped_codecs) const;
 
-  static bool ReceiveCodecsHaveChanged(std::vector<VideoCodecSettings> before,
-                                       std::vector<VideoCodecSettings> after);
+  static bool NonFlexfecReceiveCodecsHaveChanged(
+      std::vector<VideoCodecSettings> before,
+      std::vector<VideoCodecSettings> after);
 
   void FillSenderStats(VideoMediaInfo* info, bool log_stats);
   void FillReceiverStats(VideoMediaInfo* info, bool log_stats);
@@ -496,6 +511,9 @@ class WebRtcVideoChannel2 : public VideoMediaChannel, public webrtc::Transport {
   WebRtcVideoDecoderFactory* const external_decoder_factory_;
   std::vector<VideoCodecSettings> recv_codecs_;
   std::vector<webrtc::RtpExtension> recv_rtp_extensions_;
+  // See reason for keeping track of the FlexFEC payload type separately in
+  // comment in WebRtcVideoChannel2::ChangedRecvParameters.
+  int recv_flexfec_payload_type_;
   webrtc::Call::Config::BitrateConfig bitrate_config_;
   // TODO(deadbeef): Don't duplicate information between
   // send_params/recv_params, rtp_extensions, options, etc.

@@ -395,10 +395,10 @@ PeerConnection::PeerConnection(PeerConnectionFactory* factory)
     : factory_(factory),
       observer_(NULL),
       uma_observer_(NULL),
+      event_log_(RtcEventLog::Create()),
       signaling_state_(kStable),
       ice_connection_state_(kIceConnectionNew),
       ice_gathering_state_(kIceGatheringNew),
-      event_log_(RtcEventLog::Create()),
       rtcp_cname_(GenerateRtcpCname()),
       local_streams_(StreamCollection::Create()),
       remote_streams_(StreamCollection::Create()) {}
@@ -1242,6 +1242,54 @@ void PeerConnection::RegisterUMAObserver(UMAObserver* observer) {
   }
 }
 
+RTCError PeerConnection::SetBitrate(const BitrateParameters& bitrate) {
+  rtc::Thread* worker_thread = factory_->worker_thread();
+  if (!worker_thread->IsCurrent()) {
+    return worker_thread->Invoke<RTCError>(
+        RTC_FROM_HERE, rtc::Bind(&PeerConnection::SetBitrate, this, bitrate));
+  }
+
+  const bool has_min = static_cast<bool>(bitrate.min_bitrate_bps);
+  const bool has_current = static_cast<bool>(bitrate.current_bitrate_bps);
+  const bool has_max = static_cast<bool>(bitrate.max_bitrate_bps);
+  if (has_min && *bitrate.min_bitrate_bps < 0) {
+    LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER,
+                         "min_bitrate_bps <= 0");
+  }
+  if (has_current) {
+    if (has_min && *bitrate.current_bitrate_bps < *bitrate.min_bitrate_bps) {
+      LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER,
+                           "current_bitrate_bps < min_bitrate_bps");
+    } else if (*bitrate.current_bitrate_bps < 0) {
+      LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER,
+                           "curent_bitrate_bps < 0");
+    }
+  }
+  if (has_max) {
+    if (has_current &&
+        *bitrate.max_bitrate_bps < *bitrate.current_bitrate_bps) {
+      LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER,
+                           "max_bitrate_bps < current_bitrate_bps");
+    } else if (has_min && *bitrate.max_bitrate_bps < *bitrate.min_bitrate_bps) {
+      LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER,
+                           "max_bitrate_bps < min_bitrate_bps");
+    } else if (*bitrate.max_bitrate_bps < 0) {
+      LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER,
+                           "max_bitrate_bps < 0");
+    }
+  }
+
+  Call::Config::BitrateConfigMask mask;
+  mask.min_bitrate_bps = bitrate.min_bitrate_bps;
+  mask.start_bitrate_bps = bitrate.current_bitrate_bps;
+  mask.max_bitrate_bps = bitrate.max_bitrate_bps;
+
+  RTC_DCHECK(call_.get());
+  call_->SetBitrateConfigMask(mask);
+
+  return RTCError::OK();
+}
+
 bool PeerConnection::StartRtcEventLog(rtc::PlatformFile file,
                                       int64_t max_size_bytes) {
   return factory_->worker_thread()->Invoke<bool>(
@@ -1289,7 +1337,6 @@ void PeerConnection::Close() {
   stats_->UpdateStats(kStatsOutputLevelStandard);
 
   session_->Close();
-  event_log_.reset();
   network_thread()->Invoke<void>(
       RTC_FROM_HERE,
       rtc::Bind(&cricket::PortAllocator::DiscardCandidatePool,
@@ -1297,6 +1344,9 @@ void PeerConnection::Close() {
 
   factory_->worker_thread()->Invoke<void>(RTC_FROM_HERE,
                                           [this] { call_.reset(); });
+
+  // The event log must outlive call (and any other object that uses it).
+  event_log_.reset();
 }
 
 void PeerConnection::OnSessionStateChange(WebRtcSession* /*session*/,

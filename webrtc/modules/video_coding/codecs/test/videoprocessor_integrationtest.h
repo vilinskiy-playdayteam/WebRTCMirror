@@ -23,8 +23,8 @@
 #include "webrtc/sdk/android/src/jni/androidmediadecoder_jni.h"
 #include "webrtc/sdk/android/src/jni/androidmediaencoder_jni.h"
 #elif defined(WEBRTC_IOS)
-#include "webrtc/sdk/objc/Framework/Classes/h264_video_toolbox_decoder.h"
-#include "webrtc/sdk/objc/Framework/Classes/h264_video_toolbox_encoder.h"
+#include "webrtc/sdk/objc/Framework/Classes/VideoToolbox/decoder.h"
+#include "webrtc/sdk/objc/Framework/Classes/VideoToolbox/encoder.h"
 #endif
 
 #include "webrtc/base/checks.h"
@@ -431,10 +431,12 @@ class VideoProcessorIntegrationTest : public testing::Test {
         " Frame rate: %d \n",
         update_index, bit_rate_, encoding_bitrate_total_, frame_rate_);
     printf(
+        " Number of processed frames: %d, \n"
         " Number of frames to approach target rate: %d, \n"
         " Number of dropped frames: %d, \n"
         " Number of spatial resizes: %d, \n",
-        num_frames_to_hit_target_, num_dropped_frames, num_resize_actions);
+        num_frames_total_, num_frames_to_hit_target_, num_dropped_frames,
+        num_resize_actions);
     EXPECT_LE(perc_encoding_rate_mismatch_,
               rc_expected.max_encoding_rate_mismatch);
     if (num_key_frames_ > 0) {
@@ -490,6 +492,14 @@ class VideoProcessorIntegrationTest : public testing::Test {
     EXPECT_GT(psnr_result.min, quality_thresholds.min_min_psnr);
     EXPECT_GT(ssim_result.average, quality_thresholds.min_avg_ssim);
     EXPECT_GT(ssim_result.min, quality_thresholds.min_min_ssim);
+  }
+
+  void VerifyQpParser(const CodecParams& process, int frame_number) {
+    if (!process.hw_codec && (process.codec_type == kVideoCodecVP8 ||
+      process.codec_type == kVideoCodecVP9)) {
+      EXPECT_EQ(processor_->GetQpFromEncoder(frame_number),
+                processor_->GetQpFromBitstream(frame_number));
+    }
   }
 
   // Temporal layer index corresponding to frame number, for up to 3 layers.
@@ -603,7 +613,7 @@ class VideoProcessorIntegrationTest : public testing::Test {
 
       while (frame_number < num_frames) {
         EXPECT_TRUE(processor_->ProcessFrame(frame_number));
-
+        VerifyQpParser(process, frame_number);
         ++num_frames_per_update_[TemporalLayerIndexForFrame(frame_number)];
         ++num_frames_total_;
         UpdateRateControlMetrics(frame_number);

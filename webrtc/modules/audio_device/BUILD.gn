@@ -137,10 +137,10 @@ rtc_static_library("audio_device") {
           "linux/latebindingsymboltable_linux.h",
         ]
         defines += [ "LINUX_ALSA" ]
-        libs = [
-          "dl",
-          "X11",
-        ]
+        libs = [ "dl" ]
+        if (use_x11) {
+          libs += [ "X11" ]
+        }
         if (rtc_include_pulse_audio) {
           sources += [
             "linux/audio_device_pulse_linux.cc",
@@ -174,20 +174,16 @@ rtc_static_library("audio_device") {
       }
       if (is_ios) {
         public_deps = [
+          "../../base:gtest_prod",
           "../../base:rtc_base",
-          "../../sdk:rtc_sdk_common_objc",
+          "../../sdk:objc_audio",
+          "../../sdk:objc_common",
         ]
         sources += [
           "ios/audio_device_ios.h",
           "ios/audio_device_ios.mm",
           "ios/audio_device_not_implemented_ios.mm",
           "ios/audio_session_observer.h",
-          "ios/objc/RTCAudioSession+Configuration.mm",
-          "ios/objc/RTCAudioSession+Private.h",
-          "ios/objc/RTCAudioSession.h",
-          "ios/objc/RTCAudioSession.mm",
-          "ios/objc/RTCAudioSessionConfiguration.h",
-          "ios/objc/RTCAudioSessionConfiguration.m",
           "ios/objc/RTCAudioSessionDelegateAdapter.h",
           "ios/objc/RTCAudioSessionDelegateAdapter.mm",
           "ios/voice_processing_audio_unit.h",
@@ -253,6 +249,19 @@ config("mock_audio_device_config") {
   }
 }
 
+rtc_source_set("mock_audio_device") {
+  testonly = true
+  sources = [
+    "include/mock_audio_device.h",
+    "include/mock_audio_transport.h",
+  ]
+  deps = [
+    ":audio_device",
+    "../../test:test_support",
+  ]
+  all_dependent_configs = [ ":mock_audio_device_config" ]
+}
+
 if (rtc_include_tests) {
   rtc_source_set("audio_device_unittests") {
     testonly = true
@@ -296,29 +305,13 @@ if (rtc_include_tests) {
       ]
     }
     if (is_ios) {
-      sources += [ "ios/objc/RTCAudioSessionTest.mm" ]
-      if (target_cpu != "x64") {
-        sources += [ "ios/audio_device_unittest_ios.cc" ]
-      }
+      sources += [ "ios/audio_device_unittest_ios.mm" ]
       deps += [ "//third_party/ocmock" ]
     }
     if (!build_with_chromium && is_clang) {
       # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
       suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
     }
-  }
-
-  rtc_source_set("mock_audio_device") {
-    testonly = true
-    sources = [
-      "include/mock_audio_device.h",
-      "include/mock_audio_transport.h",
-    ]
-    deps = [
-      ":audio_device",
-      "../../test:test_support",
-    ]
-    all_dependent_configs = [ ":mock_audio_device_config" ]
   }
 
   if (!is_ios) {

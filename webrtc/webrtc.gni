@@ -266,6 +266,10 @@ template("rtc_test") {
     if (defined(invoker.public_configs)) {
       public_configs += invoker.public_configs
     }
+    if (!build_with_chromium && is_android) {
+      android_manifest = "//webrtc/test/android/AndroidManifest.xml"
+      deps += [ "//webrtc/test:native_test_java" ]
+    }
   }
 }
 
@@ -302,7 +306,7 @@ template("rtc_executable") {
     configs -= rtc_remove_configs
     configs -= invoker.suppressed_configs
     deps = [
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
     ]
     deps += invoker.deps
     public_configs = [ rtc_common_inherited_config ]

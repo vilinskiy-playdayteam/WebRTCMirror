@@ -17,11 +17,6 @@ namespace rtc {
 
 class Win32Filesystem : public FilesystemInterface {
  public:
-  // Opens a file. Returns an open StreamInterface if function succeeds.
-  // Otherwise, returns null.
-  virtual FileStream *OpenFile(const Pathname &filename, 
-                               const std::string &mode);
-
   // This will attempt to delete the path located at filename.
   // If the path points to a folder, it will fail with VERIFY
   virtual bool DeleteFile(const Pathname &filename);
@@ -51,9 +46,6 @@ class Win32Filesystem : public FilesystemInterface {
   // directory either exists, or is also absent.
   virtual bool IsAbsent(const Pathname& pathname);
 
-  // Returns true if pathname represents a temporary location on the system.
-  virtual bool IsTemporaryPath(const Pathname& pathname);
-
   // All of the following functions set pathname and return true if successful.
   // Returned paths always include a trailing backslash.
   // If create is true, the path will be recursively created.
@@ -69,9 +61,6 @@ class Win32Filesystem : public FilesystemInterface {
   // automatically deleted when the program exists)
   virtual bool GetTemporaryFolder(Pathname &path, bool create,
                                  const std::string *append);
-
-  // Get a temporary folder that is unique to the current user and application.
-  virtual bool GetAppTempFolder(Pathname* path);
 
  private:
   // Returns the path to the running application.

@@ -43,6 +43,7 @@ FrameBuffer::FrameBuffer(Clock* clock,
       jitter_estimator_(jitter_estimator),
       timing_(timing),
       inter_frame_delay_(clock_->TimeInMilliseconds()),
+      last_decoded_frame_timestamp_(0),
       last_decoded_frame_it_(frames_.end()),
       last_continuous_frame_it_(frames_.end()),
       num_frames_history_(0),
@@ -140,6 +141,13 @@ FrameBuffer::ReturnReason FrameBuffer::NextFrame(
         timing_->UpdateCurrentDelay(frame->RenderTime(), now_ms);
       }
 
+      // Gracefully handle bad RTP timestamps and render time issues.
+      if (HasBadRenderTiming(*frame, now_ms)) {
+        jitter_estimator_->Reset();
+        timing_->Reset();
+        frame->SetRenderTime(timing_->RenderTimeMs(frame->timestamp, now_ms));
+      }
+
       UpdateJitterDelay();
       PropagateDecodability(next_frame_it_->second);
 
@@ -188,6 +196,29 @@ FrameBuffer::ReturnReason FrameBuffer::NextFrame(
   return kTimeout;
 }
 
+bool FrameBuffer::HasBadRenderTiming(const FrameObject& frame, int64_t now_ms) {
+  // Assume that render timing errors are due to changes in the video stream.
+  int64_t render_time_ms = frame.RenderTimeMs();
+  const int64_t kMaxVideoDelayMs = 10000;
+  if (render_time_ms < 0) {
+    return true;
+  }
+  if (std::abs(render_time_ms - now_ms) > kMaxVideoDelayMs) {
+    int frame_delay = static_cast<int>(std::abs(render_time_ms - now_ms));
+    LOG(LS_WARNING) << "A frame about to be decoded is out of the configured "
+                    << "delay bounds (" << frame_delay << " > "
+                    << kMaxVideoDelayMs
+                    << "). Resetting the video jitter buffer.";
+    return true;
+  }
+  if (static_cast<int>(timing_->TargetVideoDelay()) > kMaxVideoDelayMs) {
+    LOG(LS_WARNING) << "The video target delay has grown larger than "
+                    << kMaxVideoDelayMs << " ms.";
+    return true;
+  }
+  return false;
+}
+
 void FrameBuffer::SetProtectionMode(VCMVideoProtection mode) {
   TRACE_EVENT0("webrtc", "FrameBuffer::SetProtectionMode");
   rtc::CritScope lock(&crit_);
@@ -205,6 +236,16 @@ void FrameBuffer::Stop() {
   rtc::CritScope lock(&crit_);
   stopped_ = true;
   new_continuous_frame_event_.Set();
+}
+
+void FrameBuffer::UpdatePlayoutDelays(const FrameObject& frame) {
+  TRACE_EVENT0("webrtc", "FrameBuffer::UpdatePlayoutDelays");
+  PlayoutDelay playout_delay = frame.EncodedImage().playout_delay_;
+  if (playout_delay.min_ms >= 0)
+    timing_->set_min_playout_delay(playout_delay.min_ms);
+
+  if (playout_delay.max_ms >= 0)
+    timing_->set_max_playout_delay(playout_delay.max_ms);
 }
 
 int FrameBuffer::InsertFrame(std::unique_ptr<FrameObject> frame) {
@@ -283,7 +324,7 @@ int FrameBuffer::InsertFrame(std::unique_ptr<FrameObject> frame) {
 
   if (!UpdateFrameInfoWithIncomingFrame(*frame, info))
     return last_continuous_picture_id;
-
+  UpdatePlayoutDelays(*frame);
   info->second.frame = std::move(frame);
   ++num_frames_buffered_;
 
@@ -334,11 +375,15 @@ void FrameBuffer::PropagateContinuity(FrameMap::iterator start) {
 
 void FrameBuffer::PropagateDecodability(const FrameInfo& info) {
   TRACE_EVENT0("webrtc", "FrameBuffer::PropagateDecodability");
+  RTC_CHECK(info.num_dependent_frames < FrameInfo::kMaxNumDependentFrames);
   for (size_t d = 0; d < info.num_dependent_frames; ++d) {
     auto ref_info = frames_.find(info.dependent_frames[d]);
     RTC_DCHECK(ref_info != frames_.end());
-    RTC_DCHECK_GT(ref_info->second.num_missing_decodable, 0U);
-    --ref_info->second.num_missing_decodable;
+    // TODO(philipel): Look into why we've seen this happen.
+    if (ref_info != frames_.end()) {
+      RTC_DCHECK_GT(ref_info->second.num_missing_decodable, 0U);
+      --ref_info->second.num_missing_decodable;
+    }
   }
 }
 
@@ -407,7 +452,14 @@ bool FrameBuffer::UpdateFrameInfoWithIncomingFrame(const FrameObject& frame,
       // frames are inserted or decoded.
       ref_info->second.dependent_frames[ref_info->second.num_dependent_frames] =
           key;
-      ++ref_info->second.num_dependent_frames;
+      RTC_DCHECK_LT(ref_info->second.num_dependent_frames,
+                    (FrameInfo::kMaxNumDependentFrames - 1));
+      // TODO(philipel): Look into why this could happen and handle
+      // appropriately.
+      if (ref_info->second.num_dependent_frames <
+          (FrameInfo::kMaxNumDependentFrames - 1)) {
+        ++ref_info->second.num_dependent_frames;
+      }
     }
     RTC_DCHECK_LE(ref_info->second.num_missing_continuous,
                   ref_info->second.num_missing_decodable);

@@ -229,6 +229,26 @@ rtc_source_set("video_stream_api") {
     "video_receive_stream.h",
     "video_send_stream.h",
   ]
+  deps = [
+    ":webrtc_common",
+    "api:transport_api",
+    "base:rtc_base_approved",
+    "common_video:common_video",
+  ]
+}
+
+# Contents of video_frame.h is moved from top-level down to common_video/.
+# Nothing in webrtc includes the backwards-compatibility header, so this target
+# is only for completeness.
+# TODO(nisse): Delete together with the header file once downstream applications
+# no longer use it.
+rtc_source_set("video_frame_deprecated") {
+  sources = [
+    "video_frame.h",
+  ]
+  deps = [
+    "common_video",
+  ]
 }
 
 if (!build_with_chromium) {
@@ -335,6 +355,13 @@ if (!build_with_chromium) {
 }
 
 rtc_static_library("webrtc_common") {
+  # TODO(mbonadei): Remove (bugs.webrtc.org/7745)
+  # Enabling GN check triggers cyclic dependency error:
+  # //webrtc:webrtc_common ->
+  # //webrtc/api:video_frame_api ->
+  # //webrtc/system_wrappers:system_wrappers ->
+  # //webrtc:webrtc_common
+  check_includes = false
   sources = [
     "common_types.cc",
     "common_types.h",
@@ -347,6 +374,9 @@ rtc_static_library("webrtc_common") {
     # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
     suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
   }
+  deps = [
+    "base:rtc_base_approved",
+  ]
 }
 
 if (use_libfuzzer || use_drfuzz || use_afl) {
@@ -396,7 +426,7 @@ if (rtc_include_tests) {
     }
 
     if (is_ios || is_mac) {
-      deps += [ "sdk:rtc_sdk_peerconnection_objc_unittests" ]
+      deps += [ "sdk:objc_sdk_unittests" ]
     }
   }
 
@@ -421,6 +451,9 @@ if (rtc_include_tests) {
     deps = [
       "audio:audio_tests",
       "base:rtc_base_tests_utils",
+
+      # TODO(eladalon): call_tests aren't actually video-specific, so we
+      # should move them to a more appropriate test suite.
       "call:call_tests",
       "modules/video_capture",
       "test:test_common",

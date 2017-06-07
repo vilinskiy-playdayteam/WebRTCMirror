@@ -23,15 +23,6 @@ config("rtc_media_defines_config") {
   ]
 }
 
-config("rtc_media_warnings_config") {
-  # GN orders flags on a target before flags from configs. The default config
-  # adds these flags so to cancel them out they need to come from a config and
-  # cannot be on the target directly.
-  if (!is_win) {
-    cflags = [ "-Wno-deprecated-declarations" ]
-  }
-}
-
 rtc_static_library("rtc_media_base") {
   # TODO(kjellander): Remove (bugs.webrtc.org/6828)
   # Enabling GN check triggers cyclic dependency error:
@@ -73,12 +64,9 @@ rtc_static_library("rtc_media_base") {
     "base/videocapturerfactory.h",
     "base/videocommon.cc",
     "base/videocommon.h",
-    "base/videoframe.h",
     "base/videosourcebase.cc",
     "base/videosourcebase.h",
   ]
-
-  configs += [ ":rtc_media_warnings_config" ]
 
   if (!build_with_chromium && is_clang) {
     # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
@@ -151,11 +139,9 @@ rtc_static_library("rtc_media") {
     "engine/webrtcvideocapturerfactory.cc",
     "engine/webrtcvideocapturerfactory.h",
     "engine/webrtcvideodecoderfactory.h",
-    "engine/webrtcvideoencoderfactory.cc",
     "engine/webrtcvideoencoderfactory.h",
     "engine/webrtcvideoengine2.cc",
     "engine/webrtcvideoengine2.h",
-    "engine/webrtcvideoframe.h",
     "engine/webrtcvoe.h",
     "engine/webrtcvoiceengine.cc",
     "engine/webrtcvoiceengine.h",
@@ -168,8 +154,6 @@ rtc_static_library("rtc_media") {
       "sctp/sctptransport.h",
     ]
   }
-
-  configs += [ ":rtc_media_warnings_config" ]
 
   if (!build_with_chromium && is_clang) {
     # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
@@ -223,6 +207,11 @@ rtc_static_library("rtc_media") {
     public_configs += [ ":rtc_media_defines_config" ]
     deps += [ "../modules/video_capture:video_capture_internal_impl" ]
   }
+  if (rtc_enable_protobuf) {
+    deps += [ "../modules/audio_processing/aec_dump:aec_dump_impl" ]
+  } else {
+    deps += [ "../modules/audio_processing/aec_dump:null_aec_dump_factory" ]
+  }
   deps += [
     ":rtc_media_base",
     "..:webrtc_common",
@@ -240,6 +229,7 @@ rtc_static_library("rtc_media") {
     "../modules/audio_device:audio_device",
     "../modules/audio_mixer:audio_mixer_impl",
     "../modules/audio_processing:audio_processing",
+    "../modules/audio_processing/aec_dump",
     "../modules/video_capture:video_capture_module",
     "../modules/video_coding",
     "../modules/video_coding:webrtc_h264",

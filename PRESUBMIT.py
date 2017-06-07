@@ -15,7 +15,7 @@ import sys
 
 # Files and directories that are *skipped* by cpplint in the presubmit script.
 CPPLINT_BLACKLIST = [
-  'tools-webrtc',
+  'tools_webrtc',
   'webrtc/api/video_codecs/video_decoder.h',
   'webrtc/api/video_codecs/video_encoder.h',
   'webrtc/base',
@@ -332,7 +332,8 @@ def _CheckNoMixingCAndCCSources(input_api, gn_files, output_api):
 
 def _CheckNoPackageBoundaryViolations(input_api, gn_files, output_api):
   cwd = input_api.PresubmitLocalPath()
-  script_path = os.path.join('tools-webrtc', 'check_package_boundaries.py')
+  script_path = os.path.join('tools_webrtc', 'presubmit_checks_lib',
+                             'check_package_boundaries.py')
   webrtc_path = os.path.join('webrtc')
   command = [sys.executable, script_path, webrtc_path]
   command += [gn_file.LocalPath() for gn_file in gn_files]
@@ -474,7 +475,7 @@ def _RunPythonTests(input_api, output_api):
       Join('webrtc', 'tools'),
       Join('webrtc', 'audio', 'test', 'unittests'),
   ] + [
-      root for root, _, files in os.walk(Join('tools-webrtc'))
+      root for root, _, files in os.walk(Join('tools_webrtc'))
       if any(f.endswith('_test.py') for f in files)
   ]
 
@@ -533,8 +534,8 @@ def _CommonChecks(input_api, output_api):
                   r'^third_party[\\\/].*\.py$',
                   r'^tools[\\\/].*\.py$',
                   # TODO(phoglund): should arguably be checked.
-                  r'^tools-webrtc[\\\/]mb[\\\/].*\.py$',
-                  r'^tools-webrtc[\\\/]valgrind[\\\/].*\.py$',
+                  r'^tools_webrtc[\\\/]mb[\\\/].*\.py$',
+                  r'^tools_webrtc[\\\/]valgrind[\\\/].*\.py$',
                   r'^xcodebuild.*[\\\/].*\.py$',),
       pylintrc='pylintrc'))
 
@@ -575,6 +576,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckJSONParseErrors(input_api, output_api))
   results.extend(_RunPythonTests(input_api, output_api))
   results.extend(_CheckUsageOfGoogleProtobufNamespace(input_api, output_api))
+  results.extend(_CheckOrphanHeaders(input_api, output_api))
   return results
 
 
@@ -596,9 +598,37 @@ def CheckChangeOnCommit(input_api, output_api):
   results.extend(input_api.canned_checks.CheckChangeHasDescription(
       input_api, output_api))
   results.extend(_CheckChangeHasBugField(input_api, output_api))
-  results.extend(input_api.canned_checks.CheckChangeHasTestField(
-      input_api, output_api))
   results.extend(input_api.canned_checks.CheckTreeIsOpen(
       input_api, output_api,
       json_url='http://webrtc-status.appspot.com/current?format=json'))
+  return results
+
+
+def _CheckOrphanHeaders(input_api, output_api):
+  # We need to wait until we have an input_api object and use this
+  # roundabout construct to import prebubmit_checks_lib because this file is
+  # eval-ed and thus doesn't have __file__.
+  error_msg = """Header file {} is not listed in any GN target.
+  Please create a target or add it to an existing one in {}"""
+  results = []
+  original_sys_path = sys.path
+  try:
+    sys.path = sys.path + [input_api.os_path.join(
+        input_api.PresubmitLocalPath(), 'tools_webrtc', 'presubmit_checks_lib')]
+    from check_orphan_headers import GetBuildGnPathFromFilePath
+    from check_orphan_headers import IsHeaderInBuildGn
+  finally:
+    # Restore sys.path to what it was before.
+    sys.path = original_sys_path
+
+  for f in input_api.AffectedSourceFiles(input_api.FilterSourceFile):
+    if f.LocalPath().endswith('.h') and f.Action() == 'A':
+      file_path = os.path.abspath(f.LocalPath())
+      root_dir = os.getcwd()
+      gn_file_path = GetBuildGnPathFromFilePath(file_path, os.path.exists,
+                                                root_dir)
+      in_build_gn = IsHeaderInBuildGn(file_path, gn_file_path)
+      if not in_build_gn:
+        results.append(output_api.PresubmitError(error_msg.format(
+            file_path, gn_file_path)))
   return results

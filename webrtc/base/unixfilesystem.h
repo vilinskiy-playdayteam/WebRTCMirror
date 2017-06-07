@@ -34,11 +34,6 @@ class UnixFilesystem : public FilesystemInterface {
   static void SetAppTempFolder(const std::string& folder);
 #endif
 
-  // Opens a file. Returns an open StreamInterface if function succeeds.
-  // Otherwise, returns null.
-  FileStream* OpenFile(const Pathname& filename,
-                       const std::string& mode) override;
-
   // This will attempt to delete the file located at filename.
   // It will fail with VERIY if you pass it a non-existant file, or a directory.
   bool DeleteFile(const Pathname& filename) override;
@@ -65,9 +60,6 @@ class UnixFilesystem : public FilesystemInterface {
   // Returns true if a pathname is a directory
   bool IsFolder(const Pathname& pathname) override;
 
-  // Returns true if pathname represents a temporary location on the system.
-  bool IsTemporaryPath(const Pathname& pathname) override;
-
   // Returns true of pathname represents an existing file
   bool IsFile(const Pathname& pathname) override;
 
@@ -88,9 +80,6 @@ class UnixFilesystem : public FilesystemInterface {
   bool GetFileTime(const Pathname& path,
                    FileTimeType which,
                    time_t* time) override;
-
-  // Get a temporary folder that is unique to the current user and application.
-  bool GetAppTempFolder(Pathname* path) override;
 
  private:
 #if defined(WEBRTC_ANDROID) || defined(WEBRTC_MAC)

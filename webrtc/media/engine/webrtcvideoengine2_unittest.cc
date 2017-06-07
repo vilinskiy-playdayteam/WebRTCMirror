@@ -2430,45 +2430,146 @@ TEST_F(WebRtcVideoChannel2Test, SetDefaultSendCodecs) {
   // TODO(juberti): Check RTCP, PLI, TMMBR.
 }
 
-// TODO(brandtr): Remove when FlexFEC _is_ exposed by default.
-TEST_F(WebRtcVideoChannel2Test, FlexfecCodecWithoutSsrcNotExposedByDefault) {
+// The following four tests ensures that FlexFEC is not activated by default
+// when the field trials are not enabled.
+// TODO(brandtr): Remove or update these tests when FlexFEC _is_ enabled by
+// default.
+TEST_F(WebRtcVideoChannel2Test,
+       FlexfecSendCodecWithoutSsrcNotExposedByDefault) {
   FakeVideoSendStream* stream = AddSendStream();
   webrtc::VideoSendStream::Config config = stream->GetConfig().Copy();
 
   EXPECT_EQ(-1, config.rtp.flexfec.payload_type);
+  EXPECT_EQ(0U, config.rtp.flexfec.ssrc);
+  EXPECT_TRUE(config.rtp.flexfec.protected_media_ssrcs.empty());
 }
 
-// TODO(brandtr): Remove when FlexFEC _is_ exposed by default.
-TEST_F(WebRtcVideoChannel2Test, FlexfecCodecWithSsrcNotExposedByDefault) {
+TEST_F(WebRtcVideoChannel2Test, FlexfecSendCodecWithSsrcNotExposedByDefault) {
   FakeVideoSendStream* stream = AddSendStream(
       CreatePrimaryWithFecFrStreamParams("cname", kSsrcs1[0], kFlexfecSsrc));
   webrtc::VideoSendStream::Config config = stream->GetConfig().Copy();
 
   EXPECT_EQ(-1, config.rtp.flexfec.payload_type);
+  EXPECT_EQ(0U, config.rtp.flexfec.ssrc);
+  EXPECT_TRUE(config.rtp.flexfec.protected_media_ssrcs.empty());
+}
+
+TEST_F(WebRtcVideoChannel2Test,
+       FlexfecRecvCodecWithoutSsrcNotExposedByDefault) {
+  AddRecvStream();
+
+  const std::vector<FakeFlexfecReceiveStream*>& streams =
+      fake_call_->GetFlexfecReceiveStreams();
+  EXPECT_TRUE(streams.empty());
+}
+
+TEST_F(WebRtcVideoChannel2Test, FlexfecRecvCodecWithSsrcNotExposedByDefault) {
+  AddRecvStream(
+      CreatePrimaryWithFecFrStreamParams("cname", kSsrcs1[0], kFlexfecSsrc));
+
+  const std::vector<FakeFlexfecReceiveStream*>& streams =
+      fake_call_->GetFlexfecReceiveStreams();
+  EXPECT_TRUE(streams.empty());
 }
 
 // TODO(brandtr): When FlexFEC is no longer behind a field trial, merge all
 // tests that use this test fixture into the corresponding "non-field trial"
 // tests.
-class WebRtcVideoChannel2FlexfecTest : public WebRtcVideoChannel2Test {
+class WebRtcVideoChannel2FlexfecRecvTest : public WebRtcVideoChannel2Test {
  public:
-  WebRtcVideoChannel2FlexfecTest()
-      : WebRtcVideoChannel2Test(
-            "WebRTC-FlexFEC-03-Advertised/Enabled/WebRTC-FlexFEC-03/Enabled/") {
-  }
+  WebRtcVideoChannel2FlexfecRecvTest()
+      : WebRtcVideoChannel2Test("WebRTC-FlexFEC-03-Advertised/Enabled/") {}
 };
 
-// TODO(brandtr): Merge into "non-field trial" test when FlexFEC is enabled
-// by default.
-TEST_F(WebRtcVideoChannel2FlexfecTest,
+TEST_F(WebRtcVideoChannel2FlexfecRecvTest,
        DefaultFlexfecCodecHasTransportCcAndRembFeedbackParam) {
   EXPECT_TRUE(cricket::HasTransportCc(GetEngineCodec("flexfec-03")));
   EXPECT_TRUE(cricket::HasRemb(GetEngineCodec("flexfec-03")));
 }
 
-// TODO(brandtr): Merge into "non-field trial" test when FlexFEC is enabled
-// by default.
-TEST_F(WebRtcVideoChannel2FlexfecTest, SetDefaultSendCodecsWithoutSsrc) {
+TEST_F(WebRtcVideoChannel2FlexfecRecvTest, SetDefaultRecvCodecsWithoutSsrc) {
+  AddRecvStream();
+
+  const std::vector<FakeFlexfecReceiveStream*>& streams =
+      fake_call_->GetFlexfecReceiveStreams();
+  EXPECT_TRUE(streams.empty());
+}
+
+TEST_F(WebRtcVideoChannel2FlexfecRecvTest, SetDefaultRecvCodecsWithSsrc) {
+  AddRecvStream(
+      CreatePrimaryWithFecFrStreamParams("cname", kSsrcs1[0], kFlexfecSsrc));
+
+  const std::vector<FakeFlexfecReceiveStream*>& streams =
+      fake_call_->GetFlexfecReceiveStreams();
+  ASSERT_EQ(1U, streams.size());
+  const FakeFlexfecReceiveStream* stream = streams.front();
+  const webrtc::FlexfecReceiveStream::Config& config = stream->GetConfig();
+  EXPECT_EQ(GetEngineCodec("flexfec-03").id, config.payload_type);
+  EXPECT_EQ(kFlexfecSsrc, config.remote_ssrc);
+  ASSERT_EQ(1U, config.protected_media_ssrcs.size());
+  EXPECT_EQ(kSsrcs1[0], config.protected_media_ssrcs[0]);
+}
+
+TEST_F(WebRtcVideoChannel2FlexfecRecvTest,
+       EnablingFlexfecDoesNotRecreateVideoReceiveStream) {
+  cricket::VideoRecvParameters recv_parameters;
+  recv_parameters.codecs.push_back(GetEngineCodec("VP8"));
+  ASSERT_TRUE(channel_->SetRecvParameters(recv_parameters));
+
+  AddRecvStream(
+      CreatePrimaryWithFecFrStreamParams("cname", kSsrcs1[0], kFlexfecSsrc));
+  EXPECT_EQ(1, fake_call_->GetNumCreatedReceiveStreams());
+  EXPECT_EQ(1U, fake_call_->GetVideoReceiveStreams().size());
+
+  // Enable FlexFEC.
+  recv_parameters.codecs.push_back(GetEngineCodec("flexfec-03"));
+  ASSERT_TRUE(channel_->SetRecvParameters(recv_parameters));
+  EXPECT_EQ(2, fake_call_->GetNumCreatedReceiveStreams())
+      << "Enabling FlexFEC should create FlexfecReceiveStream.";
+  EXPECT_EQ(1U, fake_call_->GetVideoReceiveStreams().size())
+      << "Enabling FlexFEC should not create VideoReceiveStream.";
+  EXPECT_EQ(1U, fake_call_->GetFlexfecReceiveStreams().size())
+      << "Enabling FlexFEC should create a single FlexfecReceiveStream.";
+}
+
+TEST_F(WebRtcVideoChannel2FlexfecRecvTest,
+       DisablingFlexfecDoesNotRecreateVideoReceiveStream) {
+  cricket::VideoRecvParameters recv_parameters;
+  recv_parameters.codecs.push_back(GetEngineCodec("VP8"));
+  recv_parameters.codecs.push_back(GetEngineCodec("flexfec-03"));
+  ASSERT_TRUE(channel_->SetRecvParameters(recv_parameters));
+
+  AddRecvStream(
+      CreatePrimaryWithFecFrStreamParams("cname", kSsrcs1[0], kFlexfecSsrc));
+  EXPECT_EQ(2, fake_call_->GetNumCreatedReceiveStreams());
+  EXPECT_EQ(1U, fake_call_->GetVideoReceiveStreams().size());
+  EXPECT_EQ(1U, fake_call_->GetFlexfecReceiveStreams().size());
+
+  // Disable FlexFEC.
+  recv_parameters.codecs.clear();
+  recv_parameters.codecs.push_back(GetEngineCodec("VP8"));
+  ASSERT_TRUE(channel_->SetRecvParameters(recv_parameters));
+  EXPECT_EQ(2, fake_call_->GetNumCreatedReceiveStreams())
+      << "Disabling FlexFEC should not recreate VideoReceiveStream.";
+  EXPECT_EQ(1U, fake_call_->GetVideoReceiveStreams().size())
+      << "Disabling FlexFEC should not destroy VideoReceiveStream.";
+  EXPECT_TRUE(fake_call_->GetFlexfecReceiveStreams().empty())
+      << "Disabling FlexFEC should destroy FlexfecReceiveStream.";
+}
+
+// TODO(brandtr): When FlexFEC is no longer behind a field trial, merge all
+// tests that use this test fixture into the corresponding "non-field trial"
+// tests.
+class WebRtcVideoChannel2FlexfecSendRecvTest : public WebRtcVideoChannel2Test {
+ public:
+  WebRtcVideoChannel2FlexfecSendRecvTest()
+      : WebRtcVideoChannel2Test(
+            "WebRTC-FlexFEC-03-Advertised/Enabled/WebRTC-FlexFEC-03/Enabled/") {
+  }
+};
+
+TEST_F(WebRtcVideoChannel2FlexfecSendRecvTest,
+       SetDefaultSendCodecsWithoutSsrc) {
   FakeVideoSendStream* stream = AddSendStream();
   webrtc::VideoSendStream::Config config = stream->GetConfig().Copy();
 
@@ -2477,9 +2578,7 @@ TEST_F(WebRtcVideoChannel2FlexfecTest, SetDefaultSendCodecsWithoutSsrc) {
   EXPECT_TRUE(config.rtp.flexfec.protected_media_ssrcs.empty());
 }
 
-// TODO(brandtr): Merge into "non-field trial" test when FlexFEC is enabled
-// by default.
-TEST_F(WebRtcVideoChannel2FlexfecTest, SetDefaultSendCodecsWithSsrc) {
+TEST_F(WebRtcVideoChannel2FlexfecSendRecvTest, SetDefaultSendCodecsWithSsrc) {
   FakeVideoSendStream* stream = AddSendStream(
       CreatePrimaryWithFecFrStreamParams("cname", kSsrcs1[0], kFlexfecSsrc));
   webrtc::VideoSendStream::Config config = stream->GetConfig().Copy();
@@ -2502,9 +2601,7 @@ TEST_F(WebRtcVideoChannel2Test, SetSendCodecsWithoutFec) {
   EXPECT_EQ(-1, config.rtp.ulpfec.red_payload_type);
 }
 
-// TODO(brandtr): Merge into "non-field trial" test when FlexFEC is enabled
-// by default.
-TEST_F(WebRtcVideoChannel2FlexfecTest, SetSendCodecsWithoutFec) {
+TEST_F(WebRtcVideoChannel2FlexfecSendRecvTest, SetSendCodecsWithoutFec) {
   cricket::VideoSendParameters parameters;
   parameters.codecs.push_back(GetEngineCodec("VP8"));
   ASSERT_TRUE(channel_->SetSendParameters(parameters));
@@ -2515,7 +2612,7 @@ TEST_F(WebRtcVideoChannel2FlexfecTest, SetSendCodecsWithoutFec) {
   EXPECT_EQ(-1, config.rtp.flexfec.payload_type);
 }
 
-TEST_F(WebRtcVideoChannel2FlexfecTest, SetRecvCodecsWithFec) {
+TEST_F(WebRtcVideoChannel2FlexfecRecvTest, SetRecvCodecsWithFec) {
   AddRecvStream(
       CreatePrimaryWithFecFrStreamParams("cname", kSsrcs1[0], kFlexfecSsrc));
 
@@ -2552,6 +2649,40 @@ TEST_F(WebRtcVideoChannel2FlexfecTest, SetRecvCodecsWithFec) {
   EXPECT_EQ(video_stream_config.rtp.rtcp_mode, flexfec_stream_config.rtcp_mode);
   EXPECT_EQ(video_stream_config.rtp.extensions,
             flexfec_stream_config.rtp_header_extensions);
+}
+
+// We should not send FlexFEC, even if we advertise it, unless the right
+// field trial is set.
+// TODO(brandtr): Remove when FlexFEC is enabled by default.
+TEST_F(WebRtcVideoChannel2FlexfecRecvTest,
+       SetSendCodecsWithoutSsrcWithFecDoesNotEnableFec) {
+  cricket::VideoSendParameters parameters;
+  parameters.codecs.push_back(GetEngineCodec("VP8"));
+  parameters.codecs.push_back(GetEngineCodec("flexfec-03"));
+  ASSERT_TRUE(channel_->SetSendParameters(parameters));
+
+  FakeVideoSendStream* stream = AddSendStream();
+  webrtc::VideoSendStream::Config config = stream->GetConfig().Copy();
+
+  EXPECT_EQ(-1, config.rtp.flexfec.payload_type);
+  EXPECT_EQ(0, config.rtp.flexfec.ssrc);
+  EXPECT_TRUE(config.rtp.flexfec.protected_media_ssrcs.empty());
+}
+
+TEST_F(WebRtcVideoChannel2FlexfecRecvTest,
+       SetSendCodecsWithSsrcWithFecDoesNotEnableFec) {
+  cricket::VideoSendParameters parameters;
+  parameters.codecs.push_back(GetEngineCodec("VP8"));
+  parameters.codecs.push_back(GetEngineCodec("flexfec-03"));
+  ASSERT_TRUE(channel_->SetSendParameters(parameters));
+
+  FakeVideoSendStream* stream = AddSendStream(
+      CreatePrimaryWithFecFrStreamParams("cname", kSsrcs1[0], kFlexfecSsrc));
+  webrtc::VideoSendStream::Config config = stream->GetConfig().Copy();
+
+  EXPECT_EQ(-1, config.rtp.flexfec.payload_type);
+  EXPECT_EQ(0, config.rtp.flexfec.ssrc);
+  EXPECT_TRUE(config.rtp.flexfec.protected_media_ssrcs.empty());
 }
 
 TEST_F(WebRtcVideoChannel2Test,
@@ -2648,9 +2779,8 @@ TEST_F(WebRtcVideoChannel2Test, SetSendCodecsWithoutFecDisablesFec) {
       << "SetSendCodec without ULPFEC should disable current ULPFEC.";
 }
 
-// TODO(brandtr): Merge into "non-field trial" test when FlexFEC is enabled
-// by default.
-TEST_F(WebRtcVideoChannel2FlexfecTest, SetSendCodecsWithoutFecDisablesFec) {
+TEST_F(WebRtcVideoChannel2FlexfecSendRecvTest,
+       SetSendCodecsWithoutFecDisablesFec) {
   cricket::VideoSendParameters parameters;
   parameters.codecs.push_back(GetEngineCodec("VP8"));
   parameters.codecs.push_back(GetEngineCodec("flexfec-03"));
@@ -3054,14 +3184,7 @@ TEST_F(WebRtcVideoChannel2Test, SetRecvCodecsWithoutFecDisablesFec) {
       << "SetSendCodec without ULPFEC should disable current ULPFEC.";
 }
 
-// TODO(brandtr): Merge into "non-field trial" test when FlexFEC is enabled
-// by default.
-TEST_F(WebRtcVideoChannel2FlexfecTest, SetRecvParamsWithoutFecDisablesFec) {
-  cricket::VideoSendParameters send_parameters;
-  send_parameters.codecs.push_back(GetEngineCodec("VP8"));
-  send_parameters.codecs.push_back(GetEngineCodec("flexfec-03"));
-  ASSERT_TRUE(channel_->SetSendParameters(send_parameters));
-
+TEST_F(WebRtcVideoChannel2FlexfecRecvTest, SetRecvParamsWithoutFecDisablesFec) {
   AddRecvStream(
       CreatePrimaryWithFecFrStreamParams("cname", kSsrcs1[0], kFlexfecSsrc));
   const std::vector<FakeFlexfecReceiveStream*>& streams =
@@ -3108,9 +3231,8 @@ TEST_F(WebRtcVideoChannel2Test, SetSendParamsWithFecEnablesFec) {
       << "ULPFEC should be enabled on the receive stream.";
 }
 
-// TODO(brandtr): Merge into "non-field trial" test when FlexFEC is enabled
-// by default.
-TEST_F(WebRtcVideoChannel2FlexfecTest, SetSendParamsWithFecEnablesFec) {
+TEST_F(WebRtcVideoChannel2FlexfecSendRecvTest,
+       SetSendRecvParamsWithFecEnablesFec) {
   AddRecvStream(
       CreatePrimaryWithFecFrStreamParams("cname", kSsrcs1[0], kFlexfecSsrc));
   const std::vector<FakeFlexfecReceiveStream*>& streams =
@@ -3145,7 +3267,7 @@ TEST_F(WebRtcVideoChannel2FlexfecTest, SetSendParamsWithFecEnablesFec) {
             stream_with_send_params->GetConfig().protected_media_ssrcs[0]);
 }
 
-TEST_F(WebRtcVideoChannel2Test, SetSendCodecsRejectDuplicateFecPayloads) {
+TEST_F(WebRtcVideoChannel2Test, SetRecvCodecsRejectDuplicateFecPayloads) {
   cricket::VideoRecvParameters parameters;
   parameters.codecs.push_back(GetEngineCodec("VP8"));
   parameters.codecs.push_back(GetEngineCodec("red"));
@@ -3153,10 +3275,8 @@ TEST_F(WebRtcVideoChannel2Test, SetSendCodecsRejectDuplicateFecPayloads) {
   EXPECT_FALSE(channel_->SetRecvParameters(parameters));
 }
 
-// TODO(brandtr): Merge into "non-field trial" test when FlexFEC is enabled
-// by default.
-TEST_F(WebRtcVideoChannel2FlexfecTest,
-       SetSendCodecsRejectDuplicateFecPayloads) {
+TEST_F(WebRtcVideoChannel2FlexfecRecvTest,
+       SetRecvCodecsRejectDuplicateFecPayloads) {
   cricket::VideoRecvParameters parameters;
   parameters.codecs.push_back(GetEngineCodec("VP8"));
   parameters.codecs.push_back(GetEngineCodec("flexfec-03"));
@@ -3589,17 +3709,19 @@ TEST_F(WebRtcVideoChannel2Test, TranslatesSenderBitrateStatsCorrectly) {
   cricket::VideoMediaInfo info;
   ASSERT_TRUE(channel_->GetStats(&info));
   ASSERT_EQ(2u, info.senders.size());
+  BandwidthEstimationInfo bwe_info;
+  channel_->FillBitrateInfo(&bwe_info);
   // Assuming stream and stream2 corresponds to senders[0] and [1] respectively
   // is OK as std::maps are sorted and AddSendStream() gives increasing SSRCs.
   EXPECT_EQ(stats.media_bitrate_bps, info.senders[0].nominal_bitrate);
   EXPECT_EQ(stats2.media_bitrate_bps, info.senders[1].nominal_bitrate);
   EXPECT_EQ(stats.target_media_bitrate_bps + stats2.target_media_bitrate_bps,
-            info.bw_estimations[0].target_enc_bitrate);
+            bwe_info.target_enc_bitrate);
   EXPECT_EQ(stats.media_bitrate_bps + stats2.media_bitrate_bps,
-            info.bw_estimations[0].actual_enc_bitrate);
-  EXPECT_EQ(1 + 3 + 5 + 7, info.bw_estimations[0].transmit_bitrate)
+            bwe_info.actual_enc_bitrate);
+  EXPECT_EQ(1 + 3 + 5 + 7, bwe_info.transmit_bitrate)
       << "Bandwidth stats should take all streams into account.";
-  EXPECT_EQ(2 + 4 + 6 + 8, info.bw_estimations[0].retransmit_bitrate)
+  EXPECT_EQ(2 + 4 + 6 + 8, bwe_info.retransmit_bitrate)
       << "Bandwidth stats should take all streams into account.";
 }
 
@@ -3809,9 +3931,7 @@ TEST_F(WebRtcVideoChannel2Test, UlpfecPacketDoesntCreateUnsignalledStream) {
                                   false /* expect_created_receive_stream */);
 }
 
-// TODO(brandtr): Change to "non-field trial" test when FlexFEC is enabled
-// by default.
-TEST_F(WebRtcVideoChannel2FlexfecTest,
+TEST_F(WebRtcVideoChannel2FlexfecRecvTest,
        FlexfecPacketDoesntCreateUnsignalledStream) {
   TestReceiveUnsignaledSsrcPacket(GetEngineCodec("flexfec-03").id,
                                   false /* expect_created_receive_stream */);
@@ -3896,6 +4016,55 @@ TEST_F(WebRtcVideoChannel2Test, ReceiveDifferentUnsignaledSsrc) {
   recv_stream->InjectFrame(video_frame3);
   EXPECT_EQ(3, renderer.num_rendered_frames());
 #endif
+}
+
+// This test verifies that when a new default stream is created for a new
+// unsignaled SSRC, the new stream does not overwrite any old stream that had
+// been the default receive stream before being properly signaled.
+TEST_F(WebRtcVideoChannel2Test,
+       NewUnsignaledStreamDoesNotDestroyPreviouslyUnsignaledStream) {
+  cricket::VideoRecvParameters parameters;
+  parameters.codecs.push_back(GetEngineCodec("VP8"));
+  ASSERT_TRUE(channel_->SetRecvParameters(parameters));
+
+  // No streams signaled and no packets received, so we should not have any
+  // stream objects created yet.
+  EXPECT_EQ(0u, fake_call_->GetVideoReceiveStreams().size());
+
+  // Receive packet on an unsignaled SSRC.
+  uint8_t data[kMinRtpPacketLen];
+  cricket::RtpHeader rtp_header;
+  rtp_header.payload_type = GetEngineCodec("VP8").id;
+  rtp_header.seq_num = rtp_header.timestamp = 0;
+  rtp_header.ssrc = kSsrcs3[0];
+  cricket::SetRtpHeader(data, sizeof(data), rtp_header);
+  rtc::CopyOnWriteBuffer packet(data, sizeof(data));
+  rtc::PacketTime packet_time;
+  channel_->OnPacketReceived(&packet, packet_time);
+  // Default receive stream should be created.
+  ASSERT_EQ(1u, fake_call_->GetVideoReceiveStreams().size());
+  FakeVideoReceiveStream* recv_stream0 =
+      fake_call_->GetVideoReceiveStreams()[0];
+  EXPECT_EQ(kSsrcs3[0], recv_stream0->GetConfig().rtp.remote_ssrc);
+
+  // Signal the SSRC.
+  EXPECT_TRUE(
+      channel_->AddRecvStream(cricket::StreamParams::CreateLegacy(kSsrcs3[0])));
+  ASSERT_EQ(1u, fake_call_->GetVideoReceiveStreams().size());
+  recv_stream0 = fake_call_->GetVideoReceiveStreams()[0];
+  EXPECT_EQ(kSsrcs3[0], recv_stream0->GetConfig().rtp.remote_ssrc);
+
+  // Receive packet on a different unsignaled SSRC.
+  rtp_header.ssrc = kSsrcs3[1];
+  cricket::SetRtpHeader(data, sizeof(data), rtp_header);
+  packet.SetData(data, sizeof(data));
+  channel_->OnPacketReceived(&packet, packet_time);
+  // New default receive stream should be created, but old stream should remain.
+  ASSERT_EQ(2u, fake_call_->GetVideoReceiveStreams().size());
+  EXPECT_EQ(recv_stream0, fake_call_->GetVideoReceiveStreams()[0]);
+  FakeVideoReceiveStream* recv_stream1 =
+      fake_call_->GetVideoReceiveStreams()[1];
+  EXPECT_EQ(kSsrcs3[1], recv_stream1->GetConfig().rtp.remote_ssrc);
 }
 
 TEST_F(WebRtcVideoChannel2Test, CanSentMaxBitrateForExistingStream) {

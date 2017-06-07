@@ -76,23 +76,16 @@ class RtcEventLogProxy final : public webrtc::RtcEventLog {
   void StopLogging() override { RTC_NOTREACHED(); }
 
   void LogVideoReceiveStreamConfig(
-      const webrtc::VideoReceiveStream::Config& config) override {
-    rtc::CritScope lock(&crit_);
-    if (event_log_) {
-      event_log_->LogVideoReceiveStreamConfig(config);
-    }
+      const webrtc::rtclog::StreamConfig&) override {
+    RTC_NOTREACHED();
   }
 
-  void LogVideoSendStreamConfig(
-      const webrtc::VideoSendStream::Config& config) override {
-    rtc::CritScope lock(&crit_);
-    if (event_log_) {
-      event_log_->LogVideoSendStreamConfig(config);
-    }
+  void LogVideoSendStreamConfig(const webrtc::rtclog::StreamConfig&) override {
+    RTC_NOTREACHED();
   }
 
   void LogAudioReceiveStreamConfig(
-      const webrtc::AudioReceiveStream::Config& config) override {
+      const webrtc::rtclog::StreamConfig& config) override {
     rtc::CritScope lock(&crit_);
     if (event_log_) {
       event_log_->LogAudioReceiveStreamConfig(config);
@@ -100,7 +93,7 @@ class RtcEventLogProxy final : public webrtc::RtcEventLog {
   }
 
   void LogAudioSendStreamConfig(
-      const webrtc::AudioSendStream::Config& config) override {
+      const webrtc::rtclog::StreamConfig& config) override {
     rtc::CritScope lock(&crit_);
     if (event_log_) {
       event_log_->LogAudioSendStreamConfig(config);
@@ -108,32 +101,28 @@ class RtcEventLogProxy final : public webrtc::RtcEventLog {
   }
 
   void LogRtpHeader(webrtc::PacketDirection direction,
-                    webrtc::MediaType media_type,
                     const uint8_t* header,
                     size_t packet_length) override {
-    LogRtpHeader(direction, media_type, header, packet_length,
-                 PacedPacketInfo::kNotAProbe);
+    LogRtpHeader(direction, header, packet_length, PacedPacketInfo::kNotAProbe);
   }
 
   void LogRtpHeader(webrtc::PacketDirection direction,
-                    webrtc::MediaType media_type,
                     const uint8_t* header,
                     size_t packet_length,
                     int probe_cluster_id) override {
     rtc::CritScope lock(&crit_);
     if (event_log_) {
-      event_log_->LogRtpHeader(direction, media_type, header, packet_length,
+      event_log_->LogRtpHeader(direction, header, packet_length,
                                probe_cluster_id);
     }
   }
 
   void LogRtcpPacket(webrtc::PacketDirection direction,
-                     webrtc::MediaType media_type,
                      const uint8_t* packet,
                      size_t length) override {
     rtc::CritScope lock(&crit_);
     if (event_log_) {
-      event_log_->LogRtcpPacket(direction, media_type, packet, length);
+      event_log_->LogRtcpPacket(direction, packet, length);
     }
   }
 

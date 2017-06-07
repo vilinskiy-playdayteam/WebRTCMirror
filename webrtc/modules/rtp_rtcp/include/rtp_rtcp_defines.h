@@ -195,9 +195,17 @@ class RtpData {
   virtual int32_t OnReceivedPayloadData(const uint8_t* payload_data,
                                         size_t payload_size,
                                         const WebRtcRTPHeader* rtp_header) = 0;
+};
 
-  virtual bool OnRecoveredPacket(const uint8_t* packet,
-                                 size_t packet_length) = 0;
+// Callback interface for packets recovered by FlexFEC or ULPFEC. In
+// the FlexFEC case, the implementation should be able to demultiplex
+// the recovered RTP packets based on SSRC.
+class RecoveredPacketReceiver {
+ public:
+  virtual void OnRecoveredPacket(const uint8_t* packet, size_t length) = 0;
+
+ protected:
+  virtual ~RecoveredPacketReceiver() = default;
 };
 
 class RtpFeedback {
@@ -376,35 +384,26 @@ class RtcpRttStats {
 // Null object version of RtpFeedback.
 class NullRtpFeedback : public RtpFeedback {
  public:
-  virtual ~NullRtpFeedback() {}
+  ~NullRtpFeedback() override {}
 
   int32_t OnInitializeDecoder(int8_t payload_type,
                               const char payloadName[RTP_PAYLOAD_NAME_SIZE],
                               int frequency,
                               size_t channels,
-                              uint32_t rate) override {
-    return 0;
-  }
+                              uint32_t rate) override;
 
   void OnIncomingSSRCChanged(uint32_t ssrc) override {}
   void OnIncomingCSRCChanged(uint32_t csrc, bool added) override {}
 };
 
-// Null object version of RtpData.
-class NullRtpData : public RtpData {
- public:
-  virtual ~NullRtpData() {}
-
-  int32_t OnReceivedPayloadData(const uint8_t* payload_data,
-                                size_t payload_size,
-                                const WebRtcRTPHeader* rtp_header) override {
-    return 0;
-  }
-
-  bool OnRecoveredPacket(const uint8_t* packet, size_t packet_length) override {
-    return true;
-  }
-};
+inline int32_t NullRtpFeedback::OnInitializeDecoder(
+    int8_t payload_type,
+    const char payloadName[RTP_PAYLOAD_NAME_SIZE],
+    int frequency,
+    size_t channels,
+    uint32_t rate) {
+  return 0;
+}
 
 // Statistics about packet loss for a single directional connection. All values
 // are totals since the connection initiated.

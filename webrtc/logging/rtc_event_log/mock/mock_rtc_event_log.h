@@ -30,33 +30,30 @@ class MockRtcEventLog : public RtcEventLog {
   MOCK_METHOD0(StopLogging, void());
 
   MOCK_METHOD1(LogVideoReceiveStreamConfig,
-               void(const webrtc::VideoReceiveStream::Config& config));
+               void(const rtclog::StreamConfig& config));
 
   MOCK_METHOD1(LogVideoSendStreamConfig,
-               void(const webrtc::VideoSendStream::Config& config));
+               void(const rtclog::StreamConfig& config));
 
   MOCK_METHOD1(LogAudioReceiveStreamConfig,
-               void(const webrtc::AudioReceiveStream::Config& config));
+               void(const rtclog::StreamConfig& config));
 
   MOCK_METHOD1(LogAudioSendStreamConfig,
-               void(const webrtc::AudioSendStream::Config& config));
+               void(const rtclog::StreamConfig& config));
 
-  MOCK_METHOD4(LogRtpHeader,
+  MOCK_METHOD3(LogRtpHeader,
                void(PacketDirection direction,
-                    MediaType media_type,
                     const uint8_t* header,
                     size_t packet_length));
 
-  MOCK_METHOD5(LogRtpHeader,
+  MOCK_METHOD4(LogRtpHeader,
                void(PacketDirection direction,
-                    MediaType media_type,
                     const uint8_t* header,
                     size_t packet_length,
                     int probe_cluster_id));
 
-  MOCK_METHOD4(LogRtcpPacket,
+  MOCK_METHOD3(LogRtcpPacket,
                void(PacketDirection direction,
-                    MediaType media_type,
                     const uint8_t* packet,
                     size_t length));
 

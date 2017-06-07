@@ -10,6 +10,7 @@
 
 package org.webrtc;
 
+import android.content.Context;
 import java.util.List;
 
 /**
@@ -29,7 +30,9 @@ public class PeerConnectionFactory {
   }
 
   private static final String TAG = "PeerConnectionFactory";
+  private static final String VIDEO_CAPTURER_THREAD_NAME = "VideoCapturerThread";
   private final long nativeFactory;
+  private static Context applicationContext;
   private static Thread networkThread;
   private static Thread workerThread;
   private static Thread signalingThread;
@@ -52,14 +55,19 @@ public class PeerConnectionFactory {
 
   // Must be called at least once before creating a PeerConnectionFactory
   // (for example, at application startup time).
-  public static native void initializeAndroidGlobals(
-      android.content.Context context, boolean videoHwAcceleration);
+  public static native void nativeInitializeAndroidGlobals(
+      Context context, boolean videoHwAcceleration);
+
+  public static void initializeAndroidGlobals(Context context, boolean videoHwAcceleration) {
+    ContextUtils.initialize(context);
+    nativeInitializeAndroidGlobals(context, videoHwAcceleration);
+  }
 
   // Older signature of initializeAndroidGlobals. The extra parameters are now meaningless.
   @Deprecated
   public static boolean initializeAndroidGlobals(Object context, boolean initializeAudio,
       boolean initializeVideo, boolean videoHwAcceleration) {
-    initializeAndroidGlobals((android.content.Context) context, videoHwAcceleration);
+    initializeAndroidGlobals((Context) context, videoHwAcceleration);
     return true;
   }
 
@@ -128,12 +136,14 @@ public class PeerConnectionFactory {
   public VideoSource createVideoSource(VideoCapturer capturer) {
     final EglBase.Context eglContext =
         localEglbase == null ? null : localEglbase.getEglBaseContext();
+    final SurfaceTextureHelper surfaceTextureHelper =
+        SurfaceTextureHelper.create(VIDEO_CAPTURER_THREAD_NAME, eglContext);
     long nativeAndroidVideoTrackSource =
-        nativeCreateVideoSource(nativeFactory, eglContext, capturer.isScreencast());
+        nativeCreateVideoSource(nativeFactory, surfaceTextureHelper, capturer.isScreencast());
     VideoCapturer.CapturerObserver capturerObserver =
         new AndroidVideoTrackSourceObserver(nativeAndroidVideoTrackSource);
-    nativeInitializeVideoCapturer(
-        nativeFactory, capturer, nativeAndroidVideoTrackSource, capturerObserver);
+    capturer.initialize(
+        surfaceTextureHelper, ContextUtils.getApplicationContext(), capturerObserver);
     return new VideoSource(nativeAndroidVideoTrackSource);
   }
 
@@ -247,11 +257,7 @@ public class PeerConnectionFactory {
   private static native long nativeCreateLocalMediaStream(long nativeFactory, String label);
 
   private static native long nativeCreateVideoSource(
-      long nativeFactory, EglBase.Context eglContext, boolean is_screencast);
-
-  private static native void nativeInitializeVideoCapturer(long native_factory,
-      VideoCapturer j_video_capturer, long native_source,
-      VideoCapturer.CapturerObserver j_frame_observer);
+      long nativeFactory, SurfaceTextureHelper surfaceTextureHelper, boolean is_screencast);
 
   private static native long nativeCreateVideoTrack(
       long nativeFactory, String id, long nativeVideoSource);

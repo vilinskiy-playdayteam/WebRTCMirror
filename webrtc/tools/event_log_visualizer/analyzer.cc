@@ -19,6 +19,7 @@
 
 #include "webrtc/base/checks.h"
 #include "webrtc/base/logging.h"
+#include "webrtc/base/ptr_util.h"
 #include "webrtc/base/rate_statistics.h"
 #include "webrtc/call/audio_receive_stream.h"
 #include "webrtc/call/audio_send_stream.h"
@@ -30,6 +31,7 @@
 #include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/common_header.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
+#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/remb.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/sender_report.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_header_extensions.h"
@@ -308,6 +310,9 @@ EventLogAnalyzer::EventLogAnalyzer(const ParsedRtcEventLog& log)
   size_t header_length;
   size_t total_length;
 
+  uint8_t last_incoming_rtcp_packet[IP_PACKET_SIZE];
+  uint8_t last_incoming_rtcp_packet_length = 0;
+
   // Make a default extension map for streams without configuration information.
   // TODO(ivoc): Once configuration of audio streams is stored in the event log,
   //             this can be removed. Tracking bug: webrtc:6399
@@ -328,55 +333,50 @@ EventLogAnalyzer::EventLogAnalyzer(const ParsedRtcEventLog& log)
 
     switch (parsed_log_.GetEventType(i)) {
       case ParsedRtcEventLog::VIDEO_RECEIVER_CONFIG_EVENT: {
-        VideoReceiveStream::Config config(nullptr);
-        parsed_log_.GetVideoReceiveConfig(i, &config);
-        StreamId stream(config.rtp.remote_ssrc, kIncomingPacket);
-        extension_maps[stream] = RtpHeaderExtensionMap(config.rtp.extensions);
+        rtclog::StreamConfig config = parsed_log_.GetVideoReceiveConfig(i);
+        StreamId stream(config.remote_ssrc, kIncomingPacket);
+        extension_maps[stream] = RtpHeaderExtensionMap(config.rtp_extensions);
         video_ssrcs_.insert(stream);
-        StreamId rtx_stream(config.rtp.rtx_ssrc, kIncomingPacket);
+        StreamId rtx_stream(config.rtx_ssrc, kIncomingPacket);
         extension_maps[rtx_stream] =
-            RtpHeaderExtensionMap(config.rtp.extensions);
+            RtpHeaderExtensionMap(config.rtp_extensions);
         video_ssrcs_.insert(rtx_stream);
         rtx_ssrcs_.insert(rtx_stream);
         break;
       }
       case ParsedRtcEventLog::VIDEO_SENDER_CONFIG_EVENT: {
-        VideoSendStream::Config config(nullptr);
-        parsed_log_.GetVideoSendConfig(i, &config);
-        for (auto ssrc : config.rtp.ssrcs) {
-          StreamId stream(ssrc, kOutgoingPacket);
-          extension_maps[stream] = RtpHeaderExtensionMap(config.rtp.extensions);
+        std::vector<rtclog::StreamConfig> configs =
+            parsed_log_.GetVideoSendConfig(i);
+        for (const auto& config : configs) {
+          StreamId stream(config.local_ssrc, kOutgoingPacket);
+          extension_maps[stream] =
+              RtpHeaderExtensionMap(config.rtp_extensions);
           video_ssrcs_.insert(stream);
-        }
-        for (auto ssrc : config.rtp.rtx.ssrcs) {
-          StreamId rtx_stream(ssrc, kOutgoingPacket);
+          StreamId rtx_stream(config.rtx_ssrc, kOutgoingPacket);
           extension_maps[rtx_stream] =
-              RtpHeaderExtensionMap(config.rtp.extensions);
+              RtpHeaderExtensionMap(config.rtp_extensions);
           video_ssrcs_.insert(rtx_stream);
           rtx_ssrcs_.insert(rtx_stream);
         }
         break;
       }
       case ParsedRtcEventLog::AUDIO_RECEIVER_CONFIG_EVENT: {
-        AudioReceiveStream::Config config;
-        parsed_log_.GetAudioReceiveConfig(i, &config);
-        StreamId stream(config.rtp.remote_ssrc, kIncomingPacket);
-        extension_maps[stream] = RtpHeaderExtensionMap(config.rtp.extensions);
+        rtclog::StreamConfig config = parsed_log_.GetAudioReceiveConfig(i);
+        StreamId stream(config.remote_ssrc, kIncomingPacket);
+        extension_maps[stream] = RtpHeaderExtensionMap(config.rtp_extensions);
         audio_ssrcs_.insert(stream);
         break;
       }
       case ParsedRtcEventLog::AUDIO_SENDER_CONFIG_EVENT: {
-        AudioSendStream::Config config(nullptr);
-        parsed_log_.GetAudioSendConfig(i, &config);
-        StreamId stream(config.rtp.ssrc, kOutgoingPacket);
-        extension_maps[stream] = RtpHeaderExtensionMap(config.rtp.extensions);
+        rtclog::StreamConfig config = parsed_log_.GetAudioSendConfig(i);
+        StreamId stream(config.local_ssrc, kOutgoingPacket);
+        extension_maps[stream] = RtpHeaderExtensionMap(config.rtp_extensions);
         audio_ssrcs_.insert(stream);
         break;
       }
       case ParsedRtcEventLog::RTP_EVENT: {
-        MediaType media_type;
-        parsed_log_.GetRtpHeader(i, &direction, &media_type, header,
-                                 &header_length, &total_length);
+        parsed_log_.GetRtpHeader(i, &direction, header, &header_length,
+                                 &total_length);
         // Parse header to get SSRC.
         RtpUtility::RtpHeaderParser rtp_parser(header, header_length);
         RTPHeader parsed_header;
@@ -400,49 +400,66 @@ EventLogAnalyzer::EventLogAnalyzer(const ParsedRtcEventLog& log)
       }
       case ParsedRtcEventLog::RTCP_EVENT: {
         uint8_t packet[IP_PACKET_SIZE];
-        MediaType media_type;
-        parsed_log_.GetRtcpPacket(i, &direction, &media_type, packet,
-                                  &total_length);
-
-        // Currently feedback is logged twice, both for audio and video.
-        // Only act on one of them.
-        if (media_type == MediaType::AUDIO || media_type == MediaType::ANY) {
-          rtcp::CommonHeader header;
-          const uint8_t* packet_end = packet + total_length;
-          for (const uint8_t* block = packet; block < packet_end;
-               block = header.NextPacket()) {
-            RTC_CHECK(header.Parse(block, packet_end - block));
-            if (header.type() == rtcp::TransportFeedback::kPacketType &&
-                header.fmt() == rtcp::TransportFeedback::kFeedbackMessageType) {
-              std::unique_ptr<rtcp::TransportFeedback> rtcp_packet(
-                  new rtcp::TransportFeedback());
-              if (rtcp_packet->Parse(header)) {
-                uint32_t ssrc = rtcp_packet->sender_ssrc();
-                StreamId stream(ssrc, direction);
-                uint64_t timestamp = parsed_log_.GetTimestamp(i);
-                rtcp_packets_[stream].push_back(LoggedRtcpPacket(
-                    timestamp, kRtcpTransportFeedback, std::move(rtcp_packet)));
-              }
-            } else if (header.type() == rtcp::SenderReport::kPacketType) {
-              std::unique_ptr<rtcp::SenderReport> rtcp_packet(
-                  new rtcp::SenderReport());
-              if (rtcp_packet->Parse(header)) {
-                uint32_t ssrc = rtcp_packet->sender_ssrc();
-                StreamId stream(ssrc, direction);
-                uint64_t timestamp = parsed_log_.GetTimestamp(i);
-                rtcp_packets_[stream].push_back(LoggedRtcpPacket(
-                    timestamp, kRtcpSr, std::move(rtcp_packet)));
-              }
-            } else if (header.type() == rtcp::ReceiverReport::kPacketType) {
-              std::unique_ptr<rtcp::ReceiverReport> rtcp_packet(
-                  new rtcp::ReceiverReport());
-              if (rtcp_packet->Parse(header)) {
-                uint32_t ssrc = rtcp_packet->sender_ssrc();
-                StreamId stream(ssrc, direction);
-                uint64_t timestamp = parsed_log_.GetTimestamp(i);
-                rtcp_packets_[stream].push_back(LoggedRtcpPacket(
-                    timestamp, kRtcpRr, std::move(rtcp_packet)));
-              }
+        parsed_log_.GetRtcpPacket(i, &direction, packet, &total_length);
+        // Currently incoming RTCP packets are logged twice, both for audio and
+        // video. Only act on one of them. Compare against the previous parsed
+        // incoming RTCP packet.
+        if (direction == webrtc::kIncomingPacket) {
+          RTC_CHECK_LE(total_length, IP_PACKET_SIZE);
+          if (total_length == last_incoming_rtcp_packet_length &&
+              memcmp(last_incoming_rtcp_packet, packet, total_length) == 0) {
+            continue;
+          } else {
+            memcpy(last_incoming_rtcp_packet, packet, total_length);
+            last_incoming_rtcp_packet_length = total_length;
+          }
+        }
+        rtcp::CommonHeader header;
+        const uint8_t* packet_end = packet + total_length;
+        for (const uint8_t* block = packet; block < packet_end;
+             block = header.NextPacket()) {
+          RTC_CHECK(header.Parse(block, packet_end - block));
+          if (header.type() == rtcp::TransportFeedback::kPacketType &&
+              header.fmt() == rtcp::TransportFeedback::kFeedbackMessageType) {
+            std::unique_ptr<rtcp::TransportFeedback> rtcp_packet(
+                rtc::MakeUnique<rtcp::TransportFeedback>());
+            if (rtcp_packet->Parse(header)) {
+              uint32_t ssrc = rtcp_packet->sender_ssrc();
+              StreamId stream(ssrc, direction);
+              uint64_t timestamp = parsed_log_.GetTimestamp(i);
+              rtcp_packets_[stream].push_back(LoggedRtcpPacket(
+                  timestamp, kRtcpTransportFeedback, std::move(rtcp_packet)));
+            }
+          } else if (header.type() == rtcp::SenderReport::kPacketType) {
+            std::unique_ptr<rtcp::SenderReport> rtcp_packet(
+                rtc::MakeUnique<rtcp::SenderReport>());
+            if (rtcp_packet->Parse(header)) {
+              uint32_t ssrc = rtcp_packet->sender_ssrc();
+              StreamId stream(ssrc, direction);
+              uint64_t timestamp = parsed_log_.GetTimestamp(i);
+              rtcp_packets_[stream].push_back(
+                  LoggedRtcpPacket(timestamp, kRtcpSr, std::move(rtcp_packet)));
+            }
+          } else if (header.type() == rtcp::ReceiverReport::kPacketType) {
+            std::unique_ptr<rtcp::ReceiverReport> rtcp_packet(
+                rtc::MakeUnique<rtcp::ReceiverReport>());
+            if (rtcp_packet->Parse(header)) {
+              uint32_t ssrc = rtcp_packet->sender_ssrc();
+              StreamId stream(ssrc, direction);
+              uint64_t timestamp = parsed_log_.GetTimestamp(i);
+              rtcp_packets_[stream].push_back(
+                  LoggedRtcpPacket(timestamp, kRtcpRr, std::move(rtcp_packet)));
+            }
+          } else if (header.type() == rtcp::Remb::kPacketType &&
+                     header.fmt() == rtcp::Remb::kFeedbackMessageType) {
+            std::unique_ptr<rtcp::Remb> rtcp_packet(
+                rtc::MakeUnique<rtcp::Remb>());
+            if (rtcp_packet->Parse(header)) {
+              uint32_t ssrc = rtcp_packet->sender_ssrc();
+              StreamId stream(ssrc, direction);
+              uint64_t timestamp = parsed_log_.GetTimestamp(i);
+              rtcp_packets_[stream].push_back(LoggedRtcpPacket(
+                  timestamp, kRtcpRemb, std::move(rtcp_packet)));
             }
           }
         }
@@ -898,8 +915,7 @@ void EventLogAnalyzer::CreateTotalBitrateGraph(
   for (size_t i = 0; i < parsed_log_.GetNumberOfEvents(); i++) {
     ParsedRtcEventLog::EventType event_type = parsed_log_.GetEventType(i);
     if (event_type == ParsedRtcEventLog::RTP_EVENT) {
-      parsed_log_.GetRtpHeader(i, &direction, nullptr, nullptr, nullptr,
-                               &total_length);
+      parsed_log_.GetRtpHeader(i, &direction, nullptr, nullptr, &total_length);
       if (direction == desired_direction) {
         uint64_t timestamp = parsed_log_.GetTimestamp(i);
         packets.push_back(TimestampSize(timestamp, total_length));
@@ -971,6 +987,32 @@ void EventLogAnalyzer::CreateTotalBitrateGraph(
     plot->AppendTimeSeries(std::move(created_series));
     plot->AppendTimeSeries(std::move(result_series));
   }
+
+  // Overlay the incoming REMB over the outgoing bitrate
+  // and outgoing REMB over incoming bitrate.
+  PacketDirection remb_direction =
+      desired_direction == kOutgoingPacket ? kIncomingPacket : kOutgoingPacket;
+  TimeSeries remb_series("Remb", LINE_STEP_GRAPH);
+  std::multimap<uint64_t, const LoggedRtcpPacket*> remb_packets;
+  for (const auto& kv : rtcp_packets_) {
+    if (kv.first.GetDirection() == remb_direction) {
+      for (const LoggedRtcpPacket& rtcp_packet : kv.second) {
+        if (rtcp_packet.type == kRtcpRemb) {
+          remb_packets.insert(
+              std::make_pair(rtcp_packet.timestamp, &rtcp_packet));
+        }
+      }
+    }
+  }
+
+  for (const auto& kv : remb_packets) {
+    const LoggedRtcpPacket* const rtcp = kv.second;
+    const rtcp::Remb* const remb = static_cast<rtcp::Remb*>(rtcp->packet.get());
+    float x = static_cast<float>(rtcp->timestamp - begin_time_) / 1000000;
+    float y = static_cast<float>(remb->bitrate_bps()) / 1000;
+    remb_series.points.emplace_back(x, y);
+  }
+  plot->AppendTimeSeriesIfNotEmpty(std::move(remb_series));
 
   plot->SetXAxis(0, call_duration_s_, "Time (s)", kLeftMargin, kRightMargin);
   plot->SetSuggestedYAxis(0, 1, "Bitrate (kbps)", kBottomMargin, kTopMargin);

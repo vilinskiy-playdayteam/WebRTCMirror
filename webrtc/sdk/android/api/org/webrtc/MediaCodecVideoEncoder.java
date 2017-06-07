@@ -54,7 +54,8 @@ public class MediaCodecVideoEncoder {
   // Amount of correction steps to reach correction maximum scale.
   private static final int BITRATE_CORRECTION_STEPS = 20;
   // Forced key frame interval - used to reduce color distortions on Qualcomm platform.
-  private static final long QCOM_VP8_KEY_FRAME_INTERVAL_ANDROID_M_MS = 25000;
+  private static final long QCOM_VP8_KEY_FRAME_INTERVAL_ANDROID_L_MS = 15000;
+  private static final long QCOM_VP8_KEY_FRAME_INTERVAL_ANDROID_M_MS = 20000;
   private static final long QCOM_VP8_KEY_FRAME_INTERVAL_ANDROID_N_MS = 15000;
 
   // Active running encoder instance. Set in initEncode() (called from native code)
@@ -128,9 +129,9 @@ public class MediaCodecVideoEncoder {
 
   // List of supported HW VP9 encoders.
   private static final MediaCodecProperties qcomVp9HwProperties = new MediaCodecProperties(
-      "OMX.qcom.", Build.VERSION_CODES.M, BitrateAdjustmentType.NO_ADJUSTMENT);
+      "OMX.qcom.", Build.VERSION_CODES.N, BitrateAdjustmentType.NO_ADJUSTMENT);
   private static final MediaCodecProperties exynosVp9HwProperties = new MediaCodecProperties(
-      "OMX.Exynos.", Build.VERSION_CODES.M, BitrateAdjustmentType.NO_ADJUSTMENT);
+      "OMX.Exynos.", Build.VERSION_CODES.N, BitrateAdjustmentType.FRAMERATE_ADJUSTMENT);
   private static final MediaCodecProperties[] vp9HwList =
       new MediaCodecProperties[] {qcomVp9HwProperties, exynosVp9HwProperties};
 
@@ -425,7 +426,10 @@ public class MediaCodecVideoEncoder {
     lastKeyFrameMs = -1;
     if (type == VideoCodecType.VIDEO_CODEC_VP8
         && properties.codecName.startsWith(qcomVp8HwProperties.codecPrefix)) {
-      if (Build.VERSION.SDK_INT == Build.VERSION_CODES.M) {
+      if (Build.VERSION.SDK_INT == Build.VERSION_CODES.LOLLIPOP
+          || Build.VERSION.SDK_INT == Build.VERSION_CODES.LOLLIPOP_MR1) {
+        forcedKeyFrameMs = QCOM_VP8_KEY_FRAME_INTERVAL_ANDROID_L_MS;
+      } else if (Build.VERSION.SDK_INT == Build.VERSION_CODES.M) {
         forcedKeyFrameMs = QCOM_VP8_KEY_FRAME_INTERVAL_ANDROID_M_MS;
       } else if (Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
         forcedKeyFrameMs = QCOM_VP8_KEY_FRAME_INTERVAL_ANDROID_N_MS;

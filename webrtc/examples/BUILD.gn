@@ -163,10 +163,14 @@ if (is_ios || (is_mac && target_cpu != "x86")) {
     public_configs = [ ":apprtc_common_config" ]
 
     deps = [
-      "//webrtc/sdk:rtc_sdk_common_objc",
       "//webrtc/system_wrappers:field_trial_default",
       "//webrtc/system_wrappers:metrics_default",
     ]
+    if (is_ios) {
+      deps += [ ":AppRTCMobile_ios_frameworks" ]
+    } else {
+      deps += [ "//webrtc/sdk:objc_common" ]
+    }
   }
 
   config("apprtc_signaling_config") {
@@ -231,9 +235,13 @@ if (is_ios || (is_mac && target_cpu != "x86")) {
       ":apprtc_common",
       ":socketrocket",
     ]
-    public_deps = [
-      "//webrtc/sdk:rtc_sdk_peerconnection_objc",
-    ]
+    if (is_ios) {
+      deps += [ ":AppRTCMobile_ios_frameworks" ]
+    } else {
+      public_deps = [
+        "//webrtc/sdk:objc_peerconnection",
+      ]
+    }
     libs = [ "QuartzCore.framework" ]
   }
 
@@ -260,9 +268,13 @@ if (is_ios || (is_mac && target_cpu != "x86")) {
       ]
 
       deps = [
+        ":AppRTCMobile_ios_frameworks",
         ":apprtc_common",
         ":apprtc_signaling",
-        "//webrtc/modules/audio_device",
+
+        # TODO(kthelgason): Remove this dep when audio_device has been
+        # moved to sdk.
+        "//webrtc/modules/audio_device:audio_device",
       ]
     }
 
@@ -290,7 +302,7 @@ if (is_ios || (is_mac && target_cpu != "x86")) {
 
     bundle_data("AppRTCMobile_ios_frameworks") {
       public_deps = [
-        "//webrtc/sdk:rtc_sdk_framework_objc+link",
+        "//webrtc/sdk:objc_framework+link",
       ]
       sources = [
         "$root_out_dir/WebRTC.framework",
@@ -338,6 +350,7 @@ if (is_ios || (is_mac && target_cpu != "x86")) {
       deps = [
         ":apprtc_common",
         ":apprtc_signaling",
+        "//webrtc/sdk:objc_ui",
       ]
     }
 
@@ -600,6 +613,40 @@ if (is_linux || is_win) {
       # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
       suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
     }
+  }
+}
+
+if (is_win) {
+  rtc_shared_library("webrtc_unity_plugin") {
+    testonly = true
+    sources = [
+      "unityplugin/simple_peer_connection.cc",
+      "unityplugin/simple_peer_connection.h",
+      "unityplugin/unity_plugin_apis.cc",
+      "unityplugin/unity_plugin_apis.h",
+    ]
+    if (!build_with_chromium && is_clang) {
+      # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
+      suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
+    }
+    cflags = [ "/wd4245" ]
+    configs += [
+      "//build/config/win:windowed",
+      ":peerconnection_client_warnings_config",
+    ]
+    deps = [
+      "//webrtc/api:libjingle_peerconnection_test_api",
+      "//webrtc/api:video_frame_api",
+      "//webrtc/base:rtc_base",
+      "//webrtc/base:rtc_base_approved",
+      "//webrtc/base:rtc_json",
+      "//webrtc/media:rtc_media",
+      "//webrtc/media:rtc_media_base",
+      "//webrtc/modules/video_capture:video_capture_module",
+      "//webrtc/pc:libjingle_peerconnection",
+      "//webrtc/system_wrappers:field_trial_default",
+      "//webrtc/system_wrappers:metrics_default",
+    ]
   }
 }
 

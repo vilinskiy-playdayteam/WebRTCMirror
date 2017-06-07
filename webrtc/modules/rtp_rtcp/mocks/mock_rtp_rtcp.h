@@ -31,9 +31,6 @@ class MockRtpData : public RtpData {
                int32_t(const uint8_t* payload_data,
                        size_t payload_size,
                        const WebRtcRTPHeader* rtp_header));
-
-  MOCK_METHOD2(OnRecoveredPacket,
-               bool(const uint8_t* packet, size_t packet_length));
 };
 
 class MockRtpRtcp : public RtpRtcp {
@@ -56,7 +53,6 @@ class MockRtpRtcp : public RtpRtcp {
   MOCK_METHOD1(RegisterSendTransport, int32_t(Transport* outgoing_transport));
   MOCK_METHOD1(SetMaxRtpPacketSize, void(size_t size));
   MOCK_METHOD1(SetTransportOverhead, void(int transport_overhead_per_packet));
-  MOCK_CONST_METHOD0(MaxPayloadSize, size_t());
   MOCK_CONST_METHOD0(MaxRtpPacketSize, size_t());
   MOCK_METHOD1(RegisterSendPayload, int32_t(const CodecInst& voice_codec));
   MOCK_METHOD1(RegisterSendPayload, int32_t(const VideoCodec& video_codec));

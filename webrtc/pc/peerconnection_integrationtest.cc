@@ -30,7 +30,6 @@
 #include "webrtc/base/fakenetwork.h"
 #include "webrtc/base/gunit.h"
 #include "webrtc/base/helpers.h"
-#include "webrtc/base/physicalsocketserver.h"
 #include "webrtc/base/ssladapter.h"
 #include "webrtc/base/sslstreamadapter.h"
 #include "webrtc/base/thread.h"
@@ -115,6 +114,18 @@ void RemoveSsrcsAndMsids(cricket::SessionDescription* desc) {
     media_desc->mutable_streams().clear();
   }
   desc->set_msid_supported(false);
+}
+
+int FindFirstMediaStatsIndexByKind(
+    const std::string& kind,
+    const std::vector<const webrtc::RTCMediaStreamTrackStats*>&
+        media_stats_vec) {
+  for (size_t i = 0; i < media_stats_vec.size(); i++) {
+    if (media_stats_vec[i]->kind.ValueToString() == kind) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 class SignalingMessageReceiver {
@@ -937,8 +948,7 @@ class PeerConnectionWrapper : public webrtc::PeerConnectionObserver,
 class PeerConnectionIntegrationTest : public testing::Test {
  public:
   PeerConnectionIntegrationTest()
-      : pss_(new rtc::PhysicalSocketServer),
-        ss_(new rtc::VirtualSocketServer(pss_.get())),
+      : ss_(new rtc::VirtualSocketServer()),
         network_thread_(new rtc::Thread(ss_.get())),
         worker_thread_(rtc::Thread::Create()) {
     RTC_CHECK(network_thread_->Start());
@@ -956,6 +966,20 @@ class PeerConnectionIntegrationTest : public testing::Test {
 
   bool SignalingStateStable() {
     return caller_->SignalingStateStable() && callee_->SignalingStateStable();
+  }
+
+  bool DtlsConnected() {
+    // TODO(deadbeef): kIceConnectionConnected currently means both ICE and DTLS
+    // are connected. This is an important distinction. Once we have separate
+    // ICE and DTLS state, this check needs to use the DTLS state.
+    return (callee()->ice_connection_state() ==
+                webrtc::PeerConnectionInterface::kIceConnectionConnected ||
+            callee()->ice_connection_state() ==
+                webrtc::PeerConnectionInterface::kIceConnectionCompleted) &&
+           (caller()->ice_connection_state() ==
+                webrtc::PeerConnectionInterface::kIceConnectionConnected ||
+            caller()->ice_connection_state() ==
+                webrtc::PeerConnectionInterface::kIceConnectionCompleted);
   }
 
   bool CreatePeerConnectionWrappers() {
@@ -1129,7 +1153,6 @@ class PeerConnectionIntegrationTest : public testing::Test {
 
  private:
   // |ss_| is used by |network_thread_| so it must be destroyed later.
-  std::unique_ptr<rtc::PhysicalSocketServer> pss_;
   std::unique_ptr<rtc::VirtualSocketServer> ss_;
   // |network_thread_| and |worker_thread_| are used by both
   // |caller_| and |callee_| so they must be destroyed
@@ -1245,6 +1268,8 @@ TEST_F(PeerConnectionIntegrationTest, DtmfSenderObserver) {
   callee()->AddAudioOnlyMediaStream();
   caller()->CreateAndSetAndSignalOffer();
   ASSERT_TRUE_WAIT(SignalingStateStable(), kDefaultTimeout);
+  // DTLS must finish before the DTMF sender can be used reliably.
+  ASSERT_TRUE_WAIT(DtlsConnected(), kDefaultTimeout);
   TestDtmfFromSenderToReceiver(caller(), callee());
   TestDtmfFromSenderToReceiver(callee(), caller());
 }
@@ -1913,9 +1938,31 @@ TEST_F(PeerConnectionIntegrationTest,
   ASSERT_EQ(1U, inbound_stream_stats.size());
   ASSERT_TRUE(inbound_stream_stats[0]->bytes_received.is_defined());
   ASSERT_GT(*inbound_stream_stats[0]->bytes_received, 0U);
-  // TODO(deadbeef): Test that track_id is defined. This is not currently
-  // working since SSRCs are used to match RtpReceivers (and their tracks) with
-  // received stream stats in TrackMediaInfoMap.
+  ASSERT_TRUE(inbound_stream_stats[0]->track_id.is_defined());
+}
+
+// Test that we can successfully get the media related stats (audio level
+// etc.) for the unsignaled stream.
+TEST_F(PeerConnectionIntegrationTest,
+       GetMediaStatsForUnsignaledStreamWithNewStatsApi) {
+  ASSERT_TRUE(CreatePeerConnectionWrappers());
+  ConnectFakeSignaling();
+  caller()->AddAudioVideoMediaStream();
+  // Remove SSRCs and MSIDs from the received offer SDP.
+  callee()->SetReceivedSdpMunger(RemoveSsrcsAndMsids);
+  caller()->CreateAndSetAndSignalOffer();
+  ASSERT_TRUE_WAIT(SignalingStateStable(), kDefaultTimeout);
+  // Wait for one audio frame to be received by the callee.
+  ExpectNewFramesReceivedWithWait(0, 0, 1, 1, kMaxWaitForFramesMs);
+
+  rtc::scoped_refptr<const webrtc::RTCStatsReport> report =
+      callee()->NewGetStats();
+  ASSERT_NE(nullptr, report);
+
+  auto media_stats = report->GetStatsOfType<webrtc::RTCMediaStreamTrackStats>();
+  auto audio_index = FindFirstMediaStatsIndexByKind("audio", media_stats);
+  ASSERT_GE(audio_index, 0);
+  EXPECT_TRUE(media_stats[audio_index]->audio_level.is_defined());
 }
 
 // Test that DTLS 1.0 is used if both sides only support DTLS 1.0.
@@ -2435,6 +2482,40 @@ TEST_F(PeerConnectionIntegrationTest, SctpDataChannelToAudioVideoUpgrade) {
       kMaxWaitForFramesMs);
 }
 
+static void MakeSpecCompliantSctpOffer(cricket::SessionDescription* desc) {
+  const ContentInfo* dc_offer = GetFirstDataContent(desc);
+  ASSERT_NE(nullptr, dc_offer);
+  cricket::DataContentDescription* dcd_offer =
+      static_cast<cricket::DataContentDescription*>(dc_offer->description);
+  dcd_offer->set_use_sctpmap(false);
+  dcd_offer->set_protocol("UDP/DTLS/SCTP");
+}
+
+// Test that the data channel works when a spec-compliant SCTP m= section is
+// offered (using "a=sctp-port" instead of "a=sctpmap", and using
+// "UDP/DTLS/SCTP" as the protocol).
+TEST_F(PeerConnectionIntegrationTest,
+       DataChannelWorksWhenSpecCompliantSctpOfferReceived) {
+  ASSERT_TRUE(CreatePeerConnectionWrappers());
+  ConnectFakeSignaling();
+  caller()->CreateDataChannel();
+  caller()->SetGeneratedSdpMunger(MakeSpecCompliantSctpOffer);
+  caller()->CreateAndSetAndSignalOffer();
+  ASSERT_TRUE_WAIT(SignalingStateStable(), kDefaultTimeout);
+  ASSERT_TRUE_WAIT(callee()->data_channel() != nullptr, kDefaultTimeout);
+  EXPECT_TRUE_WAIT(caller()->data_observer()->IsOpen(), kDefaultTimeout);
+  EXPECT_TRUE_WAIT(callee()->data_observer()->IsOpen(), kDefaultTimeout);
+
+  // Ensure data can be sent in both directions.
+  std::string data = "hello world";
+  caller()->data_channel()->Send(DataBuffer(data));
+  EXPECT_EQ_WAIT(data, callee()->data_observer()->last_message(),
+                 kDefaultTimeout);
+  callee()->data_channel()->Send(DataBuffer(data));
+  EXPECT_EQ_WAIT(data, caller()->data_observer()->last_message(),
+                 kDefaultTimeout);
+}
+
 #endif  // HAVE_SCTP
 
 // Test that the ICE connection and gathering states eventually reach
@@ -2781,19 +2862,8 @@ TEST_F(PeerConnectionIntegrationTest, EndToEndConnectionTimeWithTurnTurnPair) {
   options.offer_to_receive_video = 1;
   caller()->SetOfferAnswerOptions(options);
   caller()->CreateAndSetAndSignalOffer();
-  // TODO(deadbeef): kIceConnectionConnected currently means both ICE and DTLS
-  // are connected. This is an important distinction. Once we have separate ICE
-  // and DTLS state, this check needs to use the DTLS state.
-  EXPECT_TRUE_SIMULATED_WAIT(
-      (callee()->ice_connection_state() ==
-           webrtc::PeerConnectionInterface::kIceConnectionConnected ||
-       callee()->ice_connection_state() ==
-           webrtc::PeerConnectionInterface::kIceConnectionCompleted) &&
-          (caller()->ice_connection_state() ==
-               webrtc::PeerConnectionInterface::kIceConnectionConnected ||
-           caller()->ice_connection_state() ==
-               webrtc::PeerConnectionInterface::kIceConnectionCompleted),
-      total_connection_time_ms, fake_clock);
+  EXPECT_TRUE_SIMULATED_WAIT(DtlsConnected(), total_connection_time_ms,
+                             fake_clock);
   // Need to free the clients here since they're using things we created on
   // the stack.
   delete SetCallerPcWrapperAndReturnCurrent(nullptr);

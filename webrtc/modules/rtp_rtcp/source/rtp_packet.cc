@@ -17,9 +17,9 @@
 #include "webrtc/base/logging.h"
 #include "webrtc/base/random.h"
 #include "webrtc/common_types.h"
-#include "webrtc/modules/rtp_rtcp/source/rtp_header_extension.h"
-#include "webrtc/modules/rtp_rtcp/source/rtp_header_extensions.h"
+#include "webrtc/modules/rtp_rtcp/include/rtp_header_extension_map.h"
 #include "webrtc/modules/rtp_rtcp/source/byte_io.h"
+#include "webrtc/modules/rtp_rtcp/source/rtp_header_extensions.h"
 
 namespace webrtc {
 namespace rtp {
@@ -61,6 +61,8 @@ Packet::Packet() : Packet(nullptr, kDefaultPacketSize) {}
 
 Packet::Packet(const ExtensionManager* extensions)
     : Packet(extensions, kDefaultPacketSize) {}
+
+Packet::Packet(const Packet&) = default;
 
 Packet::Packet(const ExtensionManager* extensions, size_t capacity)
     : buffer_(capacity) {
@@ -174,6 +176,7 @@ void Packet::GetHeader(RTPHeader* header) const {
           &header->extension.videoContentType);
   GetExtension<RtpStreamId>(&header->extension.stream_id);
   GetExtension<RepairedRtpStreamId>(&header->extension.repaired_stream_id);
+  GetExtension<PlayoutDelayLimits>(&header->extension.playout_delay);
 }
 
 size_t Packet::headers_size() const {

@@ -74,8 +74,6 @@
 
 #include "webrtc/api/audio_codecs/audio_decoder_factory.h"
 #include "webrtc/api/audio_codecs/audio_encoder_factory.h"
-// TODO(ossu): Remove this once downstream projects have been updated.
-#include "webrtc/api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "webrtc/api/datachannelinterface.h"
 #include "webrtc/api/dtmfsenderinterface.h"
 #include "webrtc/api/jsep.h"
@@ -730,6 +728,23 @@ class PeerConnectionInterface : public rtc::RefCountInterface {
   // There can only be one observer at a time. Before the observer is
   // destroyed, RegisterUMAOberver(nullptr) should be called.
   virtual void RegisterUMAObserver(UMAObserver* observer) = 0;
+
+  // 0 <= min <= current <= max should hold for set parameters.
+  struct BitrateParameters {
+    rtc::Optional<int> min_bitrate_bps;
+    rtc::Optional<int> current_bitrate_bps;
+    rtc::Optional<int> max_bitrate_bps;
+  };
+
+  // SetBitrate limits the bandwidth allocated for all RTP streams sent by
+  // this PeerConnection. Other limitations might affect these limits and
+  // are respected (for example "b=AS" in SDP).
+  //
+  // Setting |current_bitrate_bps| will reset the current bitrate estimate
+  // to the provided value.
+  virtual RTCError SetBitrate(const BitrateParameters& bitrate) {
+    return RTCError::OK();
+  }
 
   // Returns the current SignalingState.
   virtual SignalingState signaling_state() = 0;

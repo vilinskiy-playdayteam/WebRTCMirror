@@ -62,6 +62,7 @@ rtc_static_library("video") {
     "../base:rtc_numerics",
     "../base:rtc_task_queue",
     "../call:call_interfaces",
+    "../call:rtp_interfaces",
     "../common_video",
     "../logging:rtc_event_log_api",
     "../media:rtc_media_base",
@@ -181,7 +182,6 @@ if (rtc_include_tests) {
       "../test:test_common",
       "../test:test_renderer",
       "../test:test_support",
-      "//third_party/gflags",
     ]
     if (!build_with_chromium && is_clang) {
       # Suppress warnings from Chrome's Clang plugins.
@@ -259,6 +259,7 @@ if (rtc_include_tests) {
       "../call:call_interfaces",
       "../common_video",
       "../logging:rtc_event_log_api",
+      "../media:rtc_media",
       "../media:rtc_media_base",
       "../media:rtc_media_tests_utils",
       "../modules:module_api",

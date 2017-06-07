@@ -108,6 +108,10 @@ rtc_static_library("audio_processing") {
     "agc/loudness_histogram.h",
     "agc/utility.cc",
     "agc/utility.h",
+    "agc2/digital_gain_applier.cc",
+    "agc2/digital_gain_applier.h",
+    "agc2/gain_controller2.cc",
+    "agc2/gain_controller2.h",
     "audio_buffer.cc",
     "audio_buffer.h",
     "audio_processing_impl.cc",
@@ -230,6 +234,7 @@ rtc_static_library("audio_processing") {
 
   defines = []
   deps = [
+    ":aec_dump_interface",
     "..:module_api",
     "../..:webrtc_common",
     "../../audio/utility:audio_frame_operations",
@@ -301,6 +306,17 @@ rtc_static_library("audio_processing") {
     "../../base:rtc_base_approved",
     "../../common_audio",
     "../../system_wrappers",
+  ]
+}
+
+rtc_source_set("aec_dump_interface") {
+  sources = [
+    "include/aec_dump.cc",
+    "include/aec_dump.h",
+  ]
+
+  deps = [
+    "../../base:rtc_base_approved",
   ]
 }
 
@@ -478,6 +494,7 @@ if (rtc_include_tests) {
         ":audioproc_f",
         ":audioproc_unittest_proto",
         ":unpack_aecdump",
+        "aec_dump:aec_dump_unittests",
         "test/conversational_speech",
         "test/py_quality_assessment",
       ]
@@ -612,6 +629,7 @@ if (rtc_include_tests) {
         "aec3/suppression_filter_unittest.cc",
         "aec3/suppression_gain_unittest.cc",
         "aec3/vector_math_unittest.cc",
+        "agc2/gain_controller2_unittest.cc",
         "audio_processing_impl_locking_unittest.cc",
         "audio_processing_impl_unittest.cc",
         "audio_processing_unittest.cc",

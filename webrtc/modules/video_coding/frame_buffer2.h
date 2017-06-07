@@ -120,6 +120,11 @@ class FrameBuffer {
 
   using FrameMap = std::map<FrameKey, FrameInfo>;
 
+  // Updates the minimal and maximal playout delays
+  // depending on the frame.
+  void UpdatePlayoutDelays(const FrameObject& frame)
+      EXCLUSIVE_LOCKS_REQUIRED(crit_);
+
   // Update all directly dependent and indirectly dependent frames and mark
   // them as continuous if all their references has been fulfilled.
   void PropagateContinuity(FrameMap::iterator start)
@@ -144,6 +149,9 @@ class FrameBuffer {
   void UpdateJitterDelay() EXCLUSIVE_LOCKS_REQUIRED(crit_);
 
   void ClearFramesAndHistory() EXCLUSIVE_LOCKS_REQUIRED(crit_);
+
+  bool HasBadRenderTiming(const FrameObject& frame, int64_t now_ms)
+      EXCLUSIVE_LOCKS_REQUIRED(crit_);
 
   FrameMap frames_ GUARDED_BY(crit_);
 

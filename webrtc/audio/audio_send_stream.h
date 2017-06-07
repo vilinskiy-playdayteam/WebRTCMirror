@@ -19,7 +19,7 @@
 #include "webrtc/call/audio_send_stream.h"
 #include "webrtc/call/audio_state.h"
 #include "webrtc/call/bitrate_allocator.h"
-#include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "webrtc/modules/rtp_rtcp/include/rtp_rtcp.h"
 #include "webrtc/voice_engine/transport_feedback_packet_loss_tracker.h"
 
 namespace webrtc {
@@ -44,7 +44,8 @@ class AudioSendStream final : public webrtc::AudioSendStream,
                   RtpTransportControllerSendInterface* transport,
                   BitrateAllocator* bitrate_allocator,
                   RtcEventLog* event_log,
-                  RtcpRttStats* rtcp_rtt_stats);
+                  RtcpRttStats* rtcp_rtt_stats,
+                  const rtc::Optional<RtpState>& suspended_rtp_state);
   ~AudioSendStream() override;
 
   // webrtc::AudioSendStream implementation.
@@ -64,7 +65,7 @@ class AudioSendStream final : public webrtc::AudioSendStream,
   uint32_t OnBitrateUpdated(uint32_t bitrate_bps,
                             uint8_t fraction_loss,
                             int64_t rtt,
-                            int64_t probing_interval_ms) override;
+                            int64_t bwe_period_ms) override;
 
   // From PacketFeedbackObserver.
   void OnPacketAdded(uint32_t ssrc, uint16_t seq_num) override;
@@ -73,6 +74,8 @@ class AudioSendStream final : public webrtc::AudioSendStream,
 
   const webrtc::AudioSendStream::Config& config() const;
   void SetTransportOverhead(int transport_overhead_per_packet);
+
+  RtpState GetRtpState() const;
 
  private:
   VoiceEngine* voice_engine() const;
@@ -110,6 +113,9 @@ class AudioSendStream final : public webrtc::AudioSendStream,
   rtc::CriticalSection packet_loss_tracker_cs_;
   TransportFeedbackPacketLossTracker packet_loss_tracker_
       GUARDED_BY(&packet_loss_tracker_cs_);
+
+  RtpRtcp* rtp_rtcp_module_;
+  rtc::Optional<RtpState> const suspended_rtp_state_;
 
   RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(AudioSendStream);
 };

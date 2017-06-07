@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "webrtc/common_types.h"
-#include "webrtc/common_video/include/video_image.h"
+#include "webrtc/common_video/include/video_frame.h"
 #include "webrtc/modules/include/module_common_types.h"
 #include "webrtc/modules/video_coding/include/video_codec_interface.h"
 #include "webrtc/modules/video_coding/include/video_coding_defines.h"
@@ -46,6 +46,11 @@ class VCMEncodedFrame : protected EncodedImage {
     _encodedWidth = width;
     _encodedHeight = height;
   }
+
+  void SetPlayoutDelay(PlayoutDelay playout_delay) {
+    playout_delay_ = playout_delay;
+  }
+
   /**
   *   Get the encoded image
   */

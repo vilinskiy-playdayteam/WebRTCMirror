@@ -38,6 +38,7 @@
 #include "webrtc/media/engine/webrtcmediaengine.h"
 #include "webrtc/media/engine/webrtcvoe.h"
 #include "webrtc/modules/audio_mixer/audio_mixer_impl.h"
+#include "webrtc/modules/audio_processing/aec_dump/aec_dump_factory.h"
 #include "webrtc/modules/audio_processing/include/audio_processing.h"
 #include "webrtc/system_wrappers/include/field_trial.h"
 #include "webrtc/system_wrappers/include/metrics.h"
@@ -228,7 +229,8 @@ WebRtcVoiceEngine::WebRtcVoiceEngine(
     const rtc::scoped_refptr<webrtc::AudioDecoderFactory>& decoder_factory,
     rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer,
     VoEWrapper* voe_wrapper)
-    : adm_(adm),
+    : low_priority_worker_queue_("rtc-low-prio", rtc::TaskQueue::Priority::LOW),
+      adm_(adm),
       encoder_factory_(encoder_factory),
       decoder_factory_(decoder_factory),
       voe_wrapper_(voe_wrapper) {
@@ -336,6 +338,7 @@ bool WebRtcVoiceEngine::ApplyOptions(const AudioOptions& options_in) {
   LOG(LS_INFO) << "WebRtcVoiceEngine::ApplyOptions: " << options_in.ToString();
   AudioOptions options = options_in;  // The options are modified below.
 
+  // Set and adjust echo canceller options.
   // kEcConference is AEC with high suppression.
   webrtc::EcModes ec_mode = webrtc::kEcConference;
   if (options.aecm_generate_comfort_noise) {
@@ -345,21 +348,13 @@ bool WebRtcVoiceEngine::ApplyOptions(const AudioOptions& options_in) {
   }
 
 #if defined(WEBRTC_IOS)
-  // On iOS, VPIO provides built-in EC, NS and AGC.
+  // On iOS, VPIO provides built-in EC.
   options.echo_cancellation = rtc::Optional<bool>(false);
-  options.auto_gain_control = rtc::Optional<bool>(false);
-  options.noise_suppression = rtc::Optional<bool>(false);
-  LOG(LS_INFO)
-      << "Always disable AEC, NS and AGC on iOS. Use built-in instead.";
+  options.extended_filter_aec = rtc::Optional<bool>(false);
+  LOG(LS_INFO) << "Always disable AEC on iOS. Use built-in instead.";
 #elif defined(ANDROID)
   ec_mode = webrtc::kEcAecm;
-#endif
-
-#if defined(WEBRTC_IOS) || defined(ANDROID)
-  options.typing_detection = rtc::Optional<bool>(false);
-  options.experimental_agc = rtc::Optional<bool>(false);
   options.extended_filter_aec = rtc::Optional<bool>(false);
-  options.experimental_ns = rtc::Optional<bool>(false);
 #endif
 
   // Delay Agnostic AEC automatically turns on EC if not set except on iOS
@@ -372,6 +367,43 @@ bool WebRtcVoiceEngine::ApplyOptions(const AudioOptions& options_in) {
       options.echo_cancellation = rtc::Optional<bool>(true);
       options.extended_filter_aec = rtc::Optional<bool>(true);
       ec_mode = webrtc::kEcConference;
+    }
+  }
+#endif
+
+// Set and adjust noise suppressor options.
+#if defined(WEBRTC_IOS)
+  // On iOS, VPIO provides built-in NS.
+  options.noise_suppression = rtc::Optional<bool>(false);
+  options.typing_detection = rtc::Optional<bool>(false);
+  options.experimental_ns = rtc::Optional<bool>(false);
+  LOG(LS_INFO) << "Always disable NS on iOS. Use built-in instead.";
+#elif defined(ANDROID)
+  options.typing_detection = rtc::Optional<bool>(false);
+  options.experimental_ns = rtc::Optional<bool>(false);
+#endif
+
+// Set and adjust gain control options.
+#if defined(WEBRTC_IOS)
+  // On iOS, VPIO provides built-in AGC.
+  options.auto_gain_control = rtc::Optional<bool>(false);
+  options.experimental_agc = rtc::Optional<bool>(false);
+  LOG(LS_INFO) << "Always disable AGC on iOS. Use built-in instead.";
+#elif defined(ANDROID)
+  options.experimental_agc = rtc::Optional<bool>(false);
+#endif
+
+#if defined(WEBRTC_IOS) || defined(WEBRTC_ANDROID)
+  // Turn off the gain control if specified by the field trial. The purpose of the field trial is to reduce the amount of resampling performed inside the audio processing module on mobile platforms by whenever possible turning off the fixed AGC mode and the high-pass filter. (https://bugs.chromium.org/p/webrtc/issues/detail?id=6181).
+  if (webrtc::field_trial::IsEnabled(
+          "WebRTC-Audio-MinimizeResamplingOnMobile")) {
+    options.auto_gain_control = rtc::Optional<bool>(false);
+    LOG(LS_INFO) << "Disable AGC according to field trial.";
+    if (!(options.noise_suppression.value_or(false) or
+          options.echo_cancellation.value_or(false))) {
+      // If possible, turn off the high-pass filter.
+      LOG(LS_INFO) << "Disable high-pass filter in response to field trial.";
+      options.highpass_filter = rtc::Optional<bool>(false);
     }
   }
 #endif
@@ -657,46 +689,28 @@ void WebRtcVoiceEngine::UnregisterChannel(WebRtcVoiceMediaChannel* channel) {
 bool WebRtcVoiceEngine::StartAecDump(rtc::PlatformFile file,
                                      int64_t max_size_bytes) {
   RTC_DCHECK(worker_thread_checker_.CalledOnValidThread());
-  FILE* aec_dump_file_stream = rtc::FdopenPlatformFileForWriting(file);
-  if (!aec_dump_file_stream) {
-    LOG(LS_ERROR) << "Could not open AEC dump file stream.";
-    if (!rtc::ClosePlatformFile(file))
-      LOG(LS_WARNING) << "Could not close file.";
+  auto aec_dump = webrtc::AecDumpFactory::Create(file, max_size_bytes,
+                                                 &low_priority_worker_queue_);
+  if (!aec_dump) {
     return false;
   }
-  StopAecDump();
-  if (apm()->StartDebugRecording(aec_dump_file_stream, max_size_bytes) !=
-      webrtc::AudioProcessing::kNoError) {
-    LOG_RTCERR0(StartDebugRecording);
-    fclose(aec_dump_file_stream);
-    return false;
-  }
-  is_dumping_aec_ = true;
+  apm()->AttachAecDump(std::move(aec_dump));
   return true;
 }
 
 void WebRtcVoiceEngine::StartAecDump(const std::string& filename) {
   RTC_DCHECK(worker_thread_checker_.CalledOnValidThread());
-  if (!is_dumping_aec_) {
-    // Start dumping AEC when we are not dumping.
-    if (apm()->StartDebugRecording(filename.c_str(), -1) !=
-        webrtc::AudioProcessing::kNoError) {
-      LOG_RTCERR1(StartDebugRecording, filename.c_str());
-    } else {
-      is_dumping_aec_ = true;
-    }
+
+  auto aec_dump =
+      webrtc::AecDumpFactory::Create(filename, -1, &low_priority_worker_queue_);
+  if (aec_dump) {
+    apm()->AttachAecDump(std::move(aec_dump));
   }
 }
 
 void WebRtcVoiceEngine::StopAecDump() {
   RTC_DCHECK(worker_thread_checker_.CalledOnValidThread());
-  if (is_dumping_aec_) {
-    // Stop dumping AEC when we are dumping.
-    if (apm()->StopDebugRecording() != webrtc::AudioProcessing::kNoError) {
-      LOG_RTCERR0(StopDebugRecording);
-    }
-    is_dumping_aec_ = false;
-  }
+  apm()->DetachAecDump();
 }
 
 int WebRtcVoiceEngine::CreateVoEChannel() {

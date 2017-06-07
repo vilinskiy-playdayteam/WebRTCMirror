@@ -28,7 +28,6 @@
 #include "webrtc/modules/bitrate_controller/include/bitrate_controller.h"
 #include "webrtc/modules/congestion_controller/include/send_side_congestion_controller.h"
 #include "webrtc/modules/pacing/paced_sender.h"
-#include "webrtc/modules/rtp_rtcp/include/rtp_rtcp.h"
 #include "webrtc/voice_engine/channel_proxy.h"
 #include "webrtc/voice_engine/include/voe_base.h"
 #include "webrtc/voice_engine/transmit_mixer.h"
@@ -37,7 +36,7 @@
 namespace webrtc {
 
 namespace internal {
-// TODO(elad.alon): Subsequent CL will make these values experiment-dependent.
+// TODO(eladalon): Subsequent CL will make these values experiment-dependent.
 constexpr size_t kPacketLossTrackerMaxWindowSizeMs = 15000;
 constexpr size_t kPacketLossRateMinNumAckedPackets = 50;
 constexpr size_t kRecoverablePacketLossRateMinNumAckedPairs = 40;
@@ -59,7 +58,8 @@ AudioSendStream::AudioSendStream(
     RtpTransportControllerSendInterface* transport,
     BitrateAllocator* bitrate_allocator,
     RtcEventLog* event_log,
-    RtcpRttStats* rtcp_rtt_stats)
+    RtcpRttStats* rtcp_rtt_stats,
+    const rtc::Optional<RtpState>& suspended_rtp_state)
     : worker_queue_(worker_queue),
       config_(Config(nullptr)),
       audio_state_(audio_state),
@@ -68,7 +68,9 @@ AudioSendStream::AudioSendStream(
       transport_(transport),
       packet_loss_tracker_(kPacketLossTrackerMaxWindowSizeMs,
                            kPacketLossRateMinNumAckedPackets,
-                           kRecoverablePacketLossRateMinNumAckedPairs) {
+                           kRecoverablePacketLossRateMinNumAckedPairs),
+      rtp_rtcp_module_(nullptr),
+      suspended_rtp_state_(suspended_rtp_state) {
   LOG(LS_INFO) << "AudioSendStream: " << config.ToString();
   RTC_DCHECK_NE(config.voe_channel_id, -1);
   RTC_DCHECK(audio_state_.get());
@@ -81,6 +83,9 @@ AudioSendStream::AudioSendStream(
   channel_proxy_->SetRtcpRttStats(rtcp_rtt_stats);
   channel_proxy_->SetRTCPStatus(true);
   transport_->send_side_cc()->RegisterPacketFeedbackObserver(this);
+  RtpReceiver* rtpReceiver = nullptr;  // Unused, but required for call.
+  channel_proxy_->GetRtpRtcp(&rtp_rtcp_module_, &rtpReceiver);
+  RTC_DCHECK(rtp_rtcp_module_);
 
   ConfigureStream(this, config, true);
 
@@ -112,6 +117,9 @@ void AudioSendStream::ConfigureStream(
 
   if (first_time || old_config.rtp.ssrc != new_config.rtp.ssrc) {
     channel_proxy->SetLocalSSRC(new_config.rtp.ssrc);
+    if (stream->suspended_rtp_state_) {
+      stream->rtp_rtcp_module_->SetRtpState(*stream->suspended_rtp_state_);
+    }
   }
   if (first_time || old_config.rtp.c_name != new_config.rtp.c_name) {
     channel_proxy->SetRTCP_CNAME(new_config.rtp.c_name);
@@ -305,7 +313,7 @@ bool AudioSendStream::DeliverRtcp(const uint8_t* packet, size_t length) {
 uint32_t AudioSendStream::OnBitrateUpdated(uint32_t bitrate_bps,
                                            uint8_t fraction_loss,
                                            int64_t rtt,
-                                           int64_t probing_interval_ms) {
+                                           int64_t bwe_period_ms) {
   // A send stream may be allocated a bitrate of zero if the allocator decides
   // to disable it. For now we ignore this decision and keep sending on min
   // bitrate.
@@ -320,7 +328,7 @@ uint32_t AudioSendStream::OnBitrateUpdated(uint32_t bitrate_bps,
   if (bitrate_bps > max_bitrate_bps)
     bitrate_bps = max_bitrate_bps;
 
-  channel_proxy_->SetBitrate(bitrate_bps, probing_interval_ms);
+  channel_proxy_->SetBitrate(bitrate_bps, bwe_period_ms);
 
   // The amount of audio protection is not exposed by the encoder, hence
   // always returning 0.
@@ -332,7 +340,7 @@ void AudioSendStream::OnPacketAdded(uint32_t ssrc, uint16_t seq_num) {
   // Only packets that belong to this stream are of interest.
   if (ssrc == config_.rtp.ssrc) {
     rtc::CritScope lock(&packet_loss_tracker_cs_);
-    // TODO(elad.alon): This function call could potentially reset the window,
+    // TODO(eladalon): This function call could potentially reset the window,
     // setting both PLR and RPLR to unknown. Consider (during upcoming
     // refactoring) passing an indication of such an event.
     packet_loss_tracker_.OnPacketAdded(seq_num, rtc::TimeMillis());
@@ -341,7 +349,7 @@ void AudioSendStream::OnPacketAdded(uint32_t ssrc, uint16_t seq_num) {
 
 void AudioSendStream::OnPacketFeedbackVector(
     const std::vector<PacketFeedback>& packet_feedback_vector) {
-  // TODO(elad.alon): This fails in UT; fix and uncomment.
+  // TODO(eladalon): This fails in UT; fix and uncomment.
   // See: https://bugs.chromium.org/p/webrtc/issues/detail?id=7405
   // RTC_DCHECK(worker_thread_checker_.CalledOnValidThread());
   rtc::Optional<float> plr;
@@ -352,7 +360,7 @@ void AudioSendStream::OnPacketFeedbackVector(
     plr = packet_loss_tracker_.GetPacketLossRate();
     rplr = packet_loss_tracker_.GetRecoverablePacketLossRate();
   }
-  // TODO(elad.alon): If R/PLR go back to unknown, no indication is given that
+  // TODO(eladalon): If R/PLR go back to unknown, no indication is given that
   // the previously sent value is no longer relevant. This will be taken care
   // of with some refactoring which is now being done.
   if (plr) {
@@ -375,6 +383,10 @@ void AudioSendStream::SetTransportOverhead(int transport_overhead_per_packet) {
   channel_proxy_->SetTransportOverhead(transport_overhead_per_packet);
 }
 
+RtpState AudioSendStream::GetRtpState() const {
+  return rtp_rtcp_module_->GetRtpState();
+}
+
 VoiceEngine* AudioSendStream::voice_engine() const {
   internal::AudioState* audio_state =
       static_cast<internal::AudioState*>(audio_state_.get());
@@ -388,6 +400,8 @@ bool AudioSendStream::SetupSendCodec(AudioSendStream* stream,
                                      const Config& new_config) {
   RTC_DCHECK(new_config.send_codec_spec);
   const auto& spec = *new_config.send_codec_spec;
+
+  RTC_DCHECK(new_config.encoder_factory);
   std::unique_ptr<AudioEncoder> encoder =
       new_config.encoder_factory->MakeAudioEncoder(spec.payload_type,
                                                    spec.format);
@@ -586,13 +600,10 @@ void AudioSendStream::RemoveBitrateObserver() {
 
 void AudioSendStream::RegisterCngPayloadType(int payload_type,
                                              int clockrate_hz) {
-  RtpRtcp* rtpRtcpModule = nullptr;
-  RtpReceiver* rtpReceiver = nullptr;  // Unused, but required for call.
-  channel_proxy_->GetRtpRtcp(&rtpRtcpModule, &rtpReceiver);
   const CodecInst codec = {payload_type, "CN", clockrate_hz, 0, 1, 0};
-  if (rtpRtcpModule->RegisterSendPayload(codec) != 0) {
-    rtpRtcpModule->DeRegisterSendPayload(codec.pltype);
-    if (rtpRtcpModule->RegisterSendPayload(codec) != 0) {
+  if (rtp_rtcp_module_->RegisterSendPayload(codec) != 0) {
+    rtp_rtcp_module_->DeRegisterSendPayload(codec.pltype);
+    if (rtp_rtcp_module_->RegisterSendPayload(codec) != 0) {
       LOG(LS_ERROR) << "RegisterCngPayloadType() failed to register CN to "
                        "RTP/RTCP module";
     }

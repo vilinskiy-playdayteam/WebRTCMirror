@@ -26,6 +26,7 @@
 #include "webrtc/base/sslstreamadapter.h"
 #include "webrtc/base/stringutils.h"
 #include "webrtc/base/thread.h"
+#include "webrtc/base/virtualsocketserver.h"
 #include "webrtc/media/base/fakevideocapturer.h"
 #include "webrtc/media/sctp/sctptransportinternal.h"
 #include "webrtc/p2p/base/fakeportallocator.h"
@@ -634,10 +635,10 @@ class MockPeerConnectionObserver : public PeerConnectionObserver {
 
 }  // namespace
 
-// The PeerConnectionMediaConfig tests below verify that configuration
-// and constraints are propagated into the MediaConfig passed to
-// CreateMediaController. These settings are intended for MediaChannel
-// constructors, but that is not exercised by these unittest.
+// The PeerConnectionMediaConfig tests below verify that configuration and
+// constraints are propagated into the PeerConnection's MediaConfig. These
+// settings are intended for MediaChannel constructors, but that is not
+// exercised by these unittest.
 class PeerConnectionFactoryForTest : public webrtc::PeerConnectionFactory {
  public:
   PeerConnectionFactoryForTest()
@@ -659,7 +660,8 @@ class PeerConnectionFactoryForTest : public webrtc::PeerConnectionFactory {
 
 class PeerConnectionInterfaceTest : public testing::Test {
  protected:
-  PeerConnectionInterfaceTest() {
+  PeerConnectionInterfaceTest()
+      : vss_(new rtc::VirtualSocketServer()), main_(vss_.get()) {
 #ifdef WEBRTC_ANDROID
     webrtc::InitializeAndroidObjects();
 #endif
@@ -1123,6 +1125,8 @@ class PeerConnectionInterfaceTest : public testing::Test {
     return audio_desc->streams()[0].cname;
   }
 
+  std::unique_ptr<rtc::VirtualSocketServer> vss_;
+  rtc::AutoSocketServerThread main_;
   cricket::FakePortAllocator* port_allocator_ = nullptr;
   FakeRTCCertificateGenerator* fake_certificate_generator_ = nullptr;
   rtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> pc_factory_;
@@ -3297,6 +3301,69 @@ TEST_F(PeerConnectionInterfaceTest,
   EXPECT_TRUE(DoSetLocalDescription(answer.release()));
 }
 
+TEST_F(PeerConnectionInterfaceTest, SetBitrateWithoutMinSucceeds) {
+  CreatePeerConnection();
+  PeerConnectionInterface::BitrateParameters bitrate;
+  bitrate.current_bitrate_bps = rtc::Optional<int>(100000);
+  EXPECT_TRUE(pc_->SetBitrate(bitrate).ok());
+}
+
+TEST_F(PeerConnectionInterfaceTest, SetBitrateNegativeMinFails) {
+  CreatePeerConnection();
+  PeerConnectionInterface::BitrateParameters bitrate;
+  bitrate.min_bitrate_bps = rtc::Optional<int>(-1);
+  EXPECT_FALSE(pc_->SetBitrate(bitrate).ok());
+}
+
+TEST_F(PeerConnectionInterfaceTest, SetBitrateCurrentLessThanMinFails) {
+  CreatePeerConnection();
+  PeerConnectionInterface::BitrateParameters bitrate;
+  bitrate.min_bitrate_bps = rtc::Optional<int>(5);
+  bitrate.current_bitrate_bps = rtc::Optional<int>(3);
+  EXPECT_FALSE(pc_->SetBitrate(bitrate).ok());
+}
+
+TEST_F(PeerConnectionInterfaceTest, SetBitrateCurrentNegativeFails) {
+  CreatePeerConnection();
+  PeerConnectionInterface::BitrateParameters bitrate;
+  bitrate.current_bitrate_bps = rtc::Optional<int>(-1);
+  EXPECT_FALSE(pc_->SetBitrate(bitrate).ok());
+}
+
+TEST_F(PeerConnectionInterfaceTest, SetBitrateMaxLessThanCurrentFails) {
+  CreatePeerConnection();
+  PeerConnectionInterface::BitrateParameters bitrate;
+  bitrate.current_bitrate_bps = rtc::Optional<int>(10);
+  bitrate.max_bitrate_bps = rtc::Optional<int>(8);
+  EXPECT_FALSE(pc_->SetBitrate(bitrate).ok());
+}
+
+TEST_F(PeerConnectionInterfaceTest, SetBitrateMaxLessThanMinFails) {
+  CreatePeerConnection();
+  PeerConnectionInterface::BitrateParameters bitrate;
+  bitrate.min_bitrate_bps = rtc::Optional<int>(10);
+  bitrate.max_bitrate_bps = rtc::Optional<int>(8);
+  EXPECT_FALSE(pc_->SetBitrate(bitrate).ok());
+}
+
+TEST_F(PeerConnectionInterfaceTest, SetBitrateMaxNegativeFails) {
+  CreatePeerConnection();
+  PeerConnectionInterface::BitrateParameters bitrate;
+  bitrate.max_bitrate_bps = rtc::Optional<int>(-1);
+  EXPECT_FALSE(pc_->SetBitrate(bitrate).ok());
+}
+
+// The current bitrate from Call's BitrateConfigMask is currently clamped by
+// Call's BitrateConfig, which comes from the SDP or a default value. This test
+// checks that a call to SetBitrate with a current bitrate that will be clamped
+// succeeds.
+TEST_F(PeerConnectionInterfaceTest, SetBitrateCurrentLessThanImplicitMin) {
+  CreatePeerConnection();
+  PeerConnectionInterface::BitrateParameters bitrate;
+  bitrate.current_bitrate_bps = rtc::Optional<int>(1);
+  EXPECT_TRUE(pc_->SetBitrate(bitrate).ok());
+}
+
 class PeerConnectionMediaConfigTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -3333,7 +3400,7 @@ TEST_F(PeerConnectionMediaConfigTest, TestDefaults) {
 }
 
 // This test verifies the DSCP constraint is recognized and passed to
-// the CreateMediaController call.
+// the PeerConnection.
 TEST_F(PeerConnectionMediaConfigTest, TestDscpConstraintTrue) {
   PeerConnectionInterface::RTCConfiguration config;
   FakeConstraints constraints;
@@ -3346,7 +3413,7 @@ TEST_F(PeerConnectionMediaConfigTest, TestDscpConstraintTrue) {
 }
 
 // This test verifies the cpu overuse detection constraint is
-// recognized and passed to the CreateMediaController call.
+// recognized and passed to the PeerConnection.
 TEST_F(PeerConnectionMediaConfigTest, TestCpuOveruseConstraintFalse) {
   PeerConnectionInterface::RTCConfiguration config;
   FakeConstraints constraints;
@@ -3360,7 +3427,7 @@ TEST_F(PeerConnectionMediaConfigTest, TestCpuOveruseConstraintFalse) {
 }
 
 // This test verifies that the disable_prerenderer_smoothing flag is
-// propagated from RTCConfiguration to the CreateMediaController call.
+// propagated from RTCConfiguration to the PeerConnection.
 TEST_F(PeerConnectionMediaConfigTest, TestDisablePrerendererSmoothingTrue) {
   PeerConnectionInterface::RTCConfiguration config;
   FakeConstraints constraints;
@@ -3373,7 +3440,7 @@ TEST_F(PeerConnectionMediaConfigTest, TestDisablePrerendererSmoothingTrue) {
 }
 
 // This test verifies the suspend below min bitrate constraint is
-// recognized and passed to the CreateMediaController call.
+// recognized and passed to the PeerConnection.
 TEST_F(PeerConnectionMediaConfigTest,
        TestSuspendBelowMinBitrateConstraintTrue) {
   PeerConnectionInterface::RTCConfiguration config;
