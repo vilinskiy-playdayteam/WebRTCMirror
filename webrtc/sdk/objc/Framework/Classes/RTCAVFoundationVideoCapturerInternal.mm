@@ -20,6 +20,7 @@
 #import "WebRTC/RTCLogging.h"
 
 #include "avfoundationformatmapper.h"
+#import "video_rotation.h"
 
 @implementation RTCAVFoundationVideoCapturerInternal {
   // Keep pointers to inputs for convenience.
@@ -212,7 +213,9 @@
   if (!self.hasStarted) {
     return;
   }
-  _capturer->CaptureSampleBuffer(sampleBuffer, _rotation);
+
+  webrtc::VideoRotation rotation = _capturer->GetUseBackCamera() ? webrtc::kVideoRotation_90 : webrtc::kVideoRotation_270;
+  _capturer->CaptureSampleBuffer(sampleBuffer, rotation);
 }
 
 - (void)captureOutput:(AVCaptureOutput *)captureOutput
@@ -505,7 +508,7 @@
 - (void)updateCameraRotation {
 #if TARGET_OS_IPHONE
     //Use default portrait for back camera and portrait upside down for front
-    //_rotation = _capturer->GetUseBackCamera() ? webrtc::kVideoRotation_90 : webrtc::kVideoRotation_270;
+    _rotation = _capturer->GetUseBackCamera() ? webrtc::kVideoRotation_90 : webrtc::kVideoRotation_270;
 #else
     // No rotation on Mac.
                         _rotation = webrtc::kVideoRotation_0;
