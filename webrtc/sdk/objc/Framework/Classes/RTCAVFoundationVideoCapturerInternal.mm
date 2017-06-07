@@ -20,7 +20,6 @@
 #import "WebRTC/RTCLogging.h"
 
 #include "avfoundationformatmapper.h"
-#import "video_rotation.h"
 
 @implementation RTCAVFoundationVideoCapturerInternal {
   // Keep pointers to inputs for convenience.
