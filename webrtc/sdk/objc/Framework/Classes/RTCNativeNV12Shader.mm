@@ -17,7 +17,6 @@
 
 #include "webrtc/base/checks.h"
 #include "webrtc/base/optional.h"
-#import "RTCVideoFrame.h"
 
 static const char kNV12FragmentShaderSource[] =
   SHADER_VERSION
