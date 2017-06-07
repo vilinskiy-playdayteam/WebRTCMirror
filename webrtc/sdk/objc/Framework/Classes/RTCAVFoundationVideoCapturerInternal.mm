@@ -488,10 +488,6 @@
                                      [_captureSession addInput:newInput];
                                    }
 
-                                   [self updateMirroring];
-                                   [self updateCameraRotation];
-                                   [self updateOrientation];
-
                                    AVCaptureDevice *newDevice = newInput.device;
                                    const cricket::VideoFormat *format =
                                      _capturer->GetCaptureFormat();
@@ -499,6 +495,10 @@
                                        newDevice, _captureSession, *format);
                                    [_captureSession commitConfiguration];
                                    connection.enabled = YES;
+
+                                   [self updateMirroring];
+                                   [self updateCameraRotation];
+                                   [self updateOrientation];
                                }];
 }
 
