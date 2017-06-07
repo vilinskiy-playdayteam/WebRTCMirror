@@ -77,7 +77,7 @@ static const char kNV12FragmentShaderSource[] =
 }
 
 - (BOOL)drawFrame:(RTCVideoFrame *)frame {
-  NSLog(@"Drawing frame with rotation: %ld", frame.rotation);
+  NSLog(@"Drawing frame with rotation: %ld", (RTCNativeNV12Shader)frame.rotation);
   glUseProgram(_nv12Program);
   if (![_textureCache uploadFrameToTextures:frame]) {
     return NO;
