@@ -12,8 +12,10 @@ if (is_ios) {
 }
 
 declare_args() {
-  # Determine whether or not to include metal rendering
-  rtc_use_metal_rendering = is_mac || (is_ios && current_cpu == "arm64")
+  # Determine whether or not to include metal rendering 
+  #rtc_use_metal_rendering = is_mac || (is_ios && current_cpu == "arm64")
+  # Keep this setting until HiveChat has iOS deployment target 8.0
+   rtc_use_metal_rendering = false
 }
 
 group("sdk") {
