@@ -17,6 +17,7 @@
 
 #include "webrtc/base/checks.h"
 #include "webrtc/base/optional.h"
+#import "RTCVideoFrame.h"
 
 static const char kNV12FragmentShaderSource[] =
   SHADER_VERSION
@@ -77,6 +78,7 @@ static const char kNV12FragmentShaderSource[] =
 }
 
 - (BOOL)drawFrame:(RTCVideoFrame *)frame {
+  NSLog(@"Drawing frame with rotation: %d", frame.rotation);
   glUseProgram(_nv12Program);
   if (![_textureCache uploadFrameToTextures:frame]) {
     return NO;
@@ -93,10 +95,10 @@ static const char kNV12FragmentShaderSource[] =
   glBindTexture(GL_TEXTURE_2D, _textureCache.uvTexture);
 
   glBindBuffer(GL_ARRAY_BUFFER, _vertexBuffer);
-  //if (!_currentRotation || frame.rotation != *_currentRotation) {
+  if (!_currentRotation || frame.rotation != *_currentRotation) {
     _currentRotation = rtc::Optional<RTCVideoRotation>(frame.rotation);
     RTCSetVertexData(*_currentRotation);
-  //}
+  }
   glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
   [_textureCache releaseTextures];

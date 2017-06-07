@@ -213,8 +213,8 @@
     return;
   }
 
-  webrtc::VideoRotation rotation = _capturer->GetUseBackCamera() ? webrtc::kVideoRotation_90 : webrtc::kVideoRotation_270;
-  _capturer->CaptureSampleBuffer(sampleBuffer, rotation);
+  NSLog(@"Output sample buffer with rotation: %ld", _rotation);
+  _capturer->CaptureSampleBuffer(sampleBuffer, _rotation);
 }
 
 - (void)captureOutput:(AVCaptureOutput *)captureOutput
