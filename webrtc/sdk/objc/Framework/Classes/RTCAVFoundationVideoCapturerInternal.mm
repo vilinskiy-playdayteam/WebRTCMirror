@@ -213,7 +213,7 @@
     return;
   }
 
-  NSLog(@"Output sample buffer with rotation: %ld", _rotation);
+  NSLog(@"Output sample buffer with rotation: %u", _rotation);
   _capturer->CaptureSampleBuffer(sampleBuffer, _rotation);
 }
 
