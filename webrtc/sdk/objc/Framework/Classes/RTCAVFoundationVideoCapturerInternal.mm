@@ -32,7 +32,6 @@
   BOOL _hasRetriedOnFatalError;
   BOOL _isRunning;
   BOOL _hasStarted;
-    NSLock *_configLock;
   rtc::CriticalSection _crit;
 }
 
@@ -48,7 +47,6 @@
 - (instancetype)initWithCapturer:(webrtc::AVFoundationVideoCapturer *)capturer {
   RTC_DCHECK(capturer);
   if (self = [super init]) {
-      _configLock = [[NSLock alloc] init];
       _capturer = capturer;
     // Create the capture session and all relevant inputs and outputs. We need
     // to do this in init because the application may want the capture session
@@ -215,11 +213,8 @@
     return;
   }
 
-    if([_configLock tryLock]) {
-        //NSLog(@"Output sample buffer with rotation: %u", _rotation);
-        _capturer->CaptureSampleBuffer(sampleBuffer, _rotation);
-        [_configLock unlock];
-    }
+  //NSLog(@"Output sample buffer with rotation: %u", _rotation);
+  _capturer->CaptureSampleBuffer(sampleBuffer, _rotation);
 }
 
 - (void)captureOutput:(AVCaptureOutput *)captureOutput
@@ -478,7 +473,6 @@
 - (void)updateSessionInputForUseBackCamera:(BOOL)useBackCamera {
   [RTCDispatcher dispatchAsyncOnType:RTCDispatcherTypeCaptureSession
                                block:^{
-                                   [_configLock lock];
                                    AVCaptureConnection *connection = [self.videoDataOutput connectionWithMediaType:AVMediaTypeVideo];
                                    connection.enabled = NO;
                                    [_captureSession beginConfiguration];
@@ -507,7 +501,6 @@
                                        newDevice, _captureSession, *format);
                                    [_captureSession commitConfiguration];
                                    connection.enabled = YES;
-                                   [_configLock unlock];
                                }];
 }
 
@@ -522,9 +515,9 @@
 }
 
 - (void)updateMirroring {
-    AVCaptureConnection *connection = [self.videoDataOutput connectionWithMediaType:AVMediaTypeVideo];
+    /*AVCaptureConnection *connection = [self.videoDataOutput connectionWithMediaType:AVMediaTypeVideo];
     connection.automaticallyAdjustsVideoMirroring = NO;
-    connection.videoMirrored = !_capturer->GetUseBackCamera();
+    connection.videoMirrored = !_capturer->GetUseBackCamera();*/
 }
 
 @end
