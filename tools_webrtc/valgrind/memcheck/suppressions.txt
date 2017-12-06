@@ -27,6 +27,20 @@
    fun:snprintf
    ...
 }
+# See: https://bugs.chromium.org/p/webrtc/issues/detail?id=7973
+{
+   libc_getaddrinfo_uninitialized
+   Memcheck:Param
+   sendmsg(mmsg[0].msg_hdr)
+   fun:sendmmsg
+   fun:__libc_res_nsend
+   fun:__libc_res_nquery
+   fun:__libc_res_nsearch
+   fun:_nss_dns_gethostbyname4_r
+   fun:gaih_inet
+   fun:getaddrinfo
+   ...
+}
 
 #-----------------------------------------------------------------------
 # webrtc stuff
@@ -40,35 +54,12 @@
    fun:_ZN3rtc47HttpServer_SignalsCloseAfterForcedCloseAll_Test8TestBodyEv
 }
 {
-   bug_6773_3
+   bug_6773
    Memcheck:Uninitialized
    fun:vfprintf
    fun:vsnprintf
    fun:snprintf
    ...
-   fun:_ZN6webrtc36RtcpPacketFirTest_TwoFciEntries_Test8TestBodyEv
-}
-{
-   bug_6773_2
-   Memcheck:Uninitialized
-   fun:vfprintf
-   fun:vsnprintf
-   fun:snprintf
-   fun:_ZN7testing12_GLOBAL__N_126PrintByteSegmentInObjectToEPKhmmPSo
-   ...
-   fun:_ZNK6webrtc11MockRtpRtcp11FlexfecSsrcEv
-   fun:_ZN6webrtc12PacketRouter16TimeToSendPacketEjtlbi
-   fun:_ZN6webrtc38PacketRouterTest_TimeToSendPacket_Test8TestBodyEv
-}
-{
-   bug_6773_1
-   Memcheck:Uninitialized
-   fun:vfprintf
-   fun:vsnprintf
-   fun:snprintf
-   fun:_ZN7testing12_GLOBAL__N_126PrintByteSegmentInObjectToEPKhmmPSo
-   ...
-   fun:_ZN6webrtc28RtcpPacketFirTest_Parse_Test8TestBodyEv
 }
 {
    bug_3446
@@ -436,14 +427,6 @@
    ...
 }
 {
-   bug_5986
-   Memcheck:Unaddressable
-   fun:silk_stereo_LR_to_MS
-   fun:silk_Encode
-   fun:opus_encode_native
-   ...
-}
-{
    bug_5987
    Memcheck:Leak
    fun:_Znw*
@@ -455,13 +438,7 @@
    fun:_Znw*
    fun:_ZNSt8_Rb_treeISsSt4pairIKSsSsESt10_Select1stIS2_EN3rtc5ilessESaIS2_EE15_M_insert_equalIS2_EESt17_Rb_tree_iteratorIS2_EOT_
    fun:_ZN3rtc8HttpData12changeHeaderERKSsS2_NS0_13HeaderCombineE
-   fun:_ZN3rtc16HttpResponseData9set_errorEj
-   fun:_ZN3rtc12_GLOBAL__N_117HttpServerMonitor9OnRequestEPNS_10HttpServerEPNS_21HttpServerTransactionE
-   fun:_ZN3rtc10HttpServer10Connection14onHttpCompleteENS_8HttpModeENS_9HttpErrorE
-   fun:_ZN3rtc8HttpBase10OnCompleteENS_9HttpErrorE
-   fun:_ZN3rtc8HttpBase17OnHttpStreamEventEPNS_15StreamInterfaceEii
-   fun:_ZN7testing12StreamSource11QueueStringEPKc
-   fun:_ZN3rtc12_GLOBAL__N_122CreateClientConnectionERNS_10HttpServerERNS0_17HttpServerMonitorEb
+   ...
    fun:_ZN3rtc47HttpServer_SignalsCloseAfterForcedCloseAll_Test8TestBodyEv
 }
 {

@@ -17,17 +17,21 @@ import os
 import re
 import subprocess
 import sys
-import urllib
+import urllib2
 
 
 # Skip these dependencies (list without solution name prefix).
 DONT_AUTOROLL_THESE = [
-  'src/third_party/gflags/src',
   'src/third_party/winsdk_samples',
-  'src/webrtc/examples/androidtests/third_party/gradle',
+  'src/examples/androidtests/third_party/gradle',
 ]
 
-WEBRTC_URL = 'https://chromium.googlesource.com/external/webrtc'
+# Run these CQ trybots in addition to the default ones in infra/config/cq.cfg.
+EXTRA_TRYBOTS = (
+    'master.internal.tryserver.corp.webrtc:linux_internal'
+)
+
+WEBRTC_URL = 'https://webrtc.googlesource.com/src'
 CHROMIUM_SRC_URL = 'https://chromium.googlesource.com/chromium/src'
 CHROMIUM_COMMIT_TEMPLATE = CHROMIUM_SRC_URL + '/+/%s'
 CHROMIUM_LOG_TEMPLATE = CHROMIUM_SRC_URL + '/+log/%s'
@@ -45,7 +49,6 @@ CHECKOUT_ROOT_DIR = os.path.realpath(os.path.join(CHECKOUT_SRC_DIR, os.pardir))
 sys.path.append(os.path.join(CHECKOUT_SRC_DIR, 'build'))
 import find_depot_tools
 find_depot_tools.add_depot_tools_to_path()
-from gclient import GClientKeywords
 
 CLANG_UPDATE_SCRIPT_URL_PATH = 'tools/clang/scripts/update.py'
 CLANG_UPDATE_SCRIPT_LOCAL_PATH = os.path.join(CHECKOUT_SRC_DIR, 'tools',
@@ -59,11 +62,14 @@ class RollError(Exception):
   pass
 
 
+def VarLookup(local_scope):
+  return lambda var_name: local_scope['vars'][var_name]
+
+
 def ParseDepsDict(deps_content):
   local_scope = {}
-  var = GClientKeywords.VarImpl({}, local_scope)
   global_scope = {
-    'Var': var.Lookup,
+    'Var': VarLookup(local_scope),
     'deps_os': {},
   }
   exec(deps_content, global_scope, local_scope)
@@ -164,7 +170,7 @@ def ReadRemoteCrCommit(revision):
 
 def ReadUrlContent(url):
   """Connect to a remote host and read the contents. Returns a list of lines."""
-  conn = urllib.urlopen(url)
+  conn = urllib2.urlopen(url)
   try:
     return conn.readlines()
   except IOError as e:
@@ -203,6 +209,8 @@ def BuildDepsentryDict(deps_dict):
   result = {}
   def AddDepsEntries(deps_subdict):
     for path, deps_url in deps_subdict.iteritems():
+      if isinstance(deps_url, dict):
+        deps_url = deps_url['url']
       if not result.has_key(path):
         url, revision = deps_url.split('@') if deps_url else (None, None)
         result[path] = DepsEntry(path, url, revision)
@@ -285,8 +293,6 @@ def GenerateCommitMessage(current_cr_rev, new_cr_rev, current_commit_pos,
   commit_msg.append('Change log: %s' % (CHROMIUM_LOG_TEMPLATE % rev_interval))
   commit_msg.append('Full diff: %s\n' % (CHROMIUM_COMMIT_TEMPLATE %
                                          rev_interval))
-  # TBR field will be empty unless in some custom cases, where some engineers
-  # are added.
   tbr_authors = ''
   if changed_deps_list:
     commit_msg.append('Changed dependencies:')
@@ -312,8 +318,14 @@ def GenerateCommitMessage(current_cr_rev, new_cr_rev, current_commit_pos,
   else:
     commit_msg.append('No update to Clang.\n')
 
+  # TBR needs to be non-empty for Gerrit to process it.
+  git_author = _RunCommand(['git', 'config', 'user.email'],
+                           working_dir=CHECKOUT_SRC_DIR)[0].splitlines()[0]
+  tbr_authors = git_author + ',' + tbr_authors
+
   commit_msg.append('TBR=%s' % tbr_authors)
   commit_msg.append('BUG=None')
+  commit_msg.append('CQ_INCLUDE_TRYBOTS=%s' % EXTRA_TRYBOTS)
   return '\n'.join(commit_msg)
 
 
@@ -391,20 +403,14 @@ def _LocalCommit(commit_msg, dry_run):
     _RunCommand(['git', 'commit', '-m', commit_msg])
 
 
-def _UploadCL(dry_run, rietveld_email=None):
+def _UploadCL(dry_run, skip_cq=False):
   logging.info('Uploading CL...')
   if not dry_run:
-    cmd = ['git', 'cl', 'upload', '-f']
-    if rietveld_email:
-      cmd.append('--email=%s' % rietveld_email)
-    _RunCommand(cmd, extra_env={'EDITOR': 'true'})
-
-
-def _SendToCQ(dry_run, skip_cq):
-  logging.info('Sending the CL to the CQ...')
-  if not dry_run and not skip_cq:
-    _RunCommand(['git', 'cl', 'set_commit'])
-    logging.info('Sent the CL to the CQ.')
+    cmd = ['git', 'cl', 'upload', '-f', '--gerrit']
+    if not skip_cq:
+      logging.info('Sending the CL to the CQ...')
+      cmd.extend(['--use-commit-queue', '--send-mail'])
+    _RunCommand(cmd, extra_env={'EDITOR': 'true', 'SKIP_GCE_AUTH_FOR_GIT': '1'})
 
 
 def main():
@@ -475,8 +481,7 @@ def main():
     logging.info("No DEPS changes detected, skipping CL creation.")
   else:
     _LocalCommit(commit_msg, opts.dry_run)
-    _UploadCL(opts.dry_run, opts.rietveld_email)
-    _SendToCQ(opts.dry_run, opts.skip_cq)
+    _UploadCL(opts.dry_run, opts.skip_cq)
   return 0
 
 

@@ -5,6 +5,10 @@
       "xctest": true
     },
     {
+       "app": "sdk_unittests",
+       "xctest": true
+    },
+    {
       "app": "audio_decoder_unittests"
     },
     {
@@ -17,10 +21,22 @@
       "app": "modules_tests"
     },
     {
+      "app": "modules_unittests"
+    },
+    {
+      "app": "ortc_unittests"
+    },
+    {
+      "app": "rtc_media_unittests"
+    },
+    {
       "app": "rtc_pc_unittests"
     },
     {
       "app": "rtc_stats_unittests"
+    },
+    {
+      "app": "rtc_unittests"
     },
     {
       "app": "system_wrappers_unittests"
@@ -32,7 +48,16 @@
       "app": "tools_unittests"
     },
     {
+      "app": "video_capture_tests"
+    },
+    {
+      "app": "video_engine_tests"
+    },
+    {
       "app": "voice_engine_unittests"
+    },
+    {
+      "app": "webrtc_nonparallel_tests"
     }
   ]
 }

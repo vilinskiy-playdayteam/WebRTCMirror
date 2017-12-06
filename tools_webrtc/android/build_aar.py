@@ -34,18 +34,29 @@ import tempfile
 import zipfile
 
 
+SCRIPT_DIR = os.path.dirname(os.path.realpath(sys.argv[0]))
+SRC_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir))
 DEFAULT_ARCHS = ['armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64']
 NEEDED_SO_FILES = ['libjingle_peerconnection_so.so']
-JAR_FILE = 'lib.java/webrtc/sdk/android/libwebrtc.jar'
-MANIFEST_FILE = 'webrtc/sdk/android/AndroidManifest.xml'
+JAR_FILE = 'lib.java/sdk/android/libwebrtc.jar'
+MANIFEST_FILE = 'sdk/android/AndroidManifest.xml'
 TARGETS = [
-  'webrtc/sdk/android:libwebrtc',
-  'webrtc/sdk/android:libjingle_peerconnection_so',
+  'sdk/android:libwebrtc',
+  'sdk/android:libjingle_peerconnection_so',
 ]
+
+sys.path.append(os.path.join(SCRIPT_DIR, '..', 'libs'))
+from generate_licenses import LicenseBuilder
+
+sys.path.append(os.path.join(SRC_DIR, 'build'))
+import find_depot_tools
+
 
 
 def _ParseArgs():
   parser = argparse.ArgumentParser(description='libwebrtc.aar generator.')
+  parser.add_argument('--build-dir',
+      help='Build dir. By default will create and use temporary dir.')
   parser.add_argument('--output', default='libwebrtc.aar',
       help='Output file of the script.')
   parser.add_argument('--arch', default=DEFAULT_ARCHS, nargs='*',
@@ -60,14 +71,16 @@ def _ParseArgs():
 
 
 def _RunGN(args):
-  cmd = ['gn']
+  cmd = [sys.executable,
+         os.path.join(find_depot_tools.DEPOT_TOOLS_PATH, 'gn.py')]
   cmd.extend(args)
   logging.debug('Running: %r', cmd)
   subprocess.check_call(cmd)
 
 
 def _RunNinja(output_directory, args):
-  cmd = ['ninja', '-C', output_directory]
+  cmd = [os.path.join(find_depot_tools.DEPOT_TOOLS_PATH, 'ninja'),
+         '-C', output_directory]
   cmd.extend(args)
   logging.debug('Running: %r', cmd)
   subprocess.check_call(cmd)
@@ -83,9 +96,9 @@ def _EncodeForGN(value):
     return repr(value)
 
 
-def _GetOutputDirectory(tmp_dir, arch):
+def _GetOutputDirectory(build_dir, arch):
   """Returns the GN output directory for the target architecture."""
-  return os.path.join(tmp_dir, arch)
+  return os.path.join(build_dir, arch)
 
 
 def _GetTargetCpu(arch):
@@ -114,14 +127,15 @@ def _GetArmVersion(arch):
     raise Exception('Unknown arch: ' + arch)
 
 
-def Build(tmp_dir, arch, use_goma, extra_gn_args):
+def Build(build_dir, arch, use_goma, extra_gn_args):
   """Generates target architecture using GN and builds it using ninja."""
   logging.info('Building: %s', arch)
-  output_directory = _GetOutputDirectory(tmp_dir, arch)
+  output_directory = _GetOutputDirectory(build_dir, arch)
   gn_args = {
     'target_os': 'android',
     'is_debug': False,
     'is_component_build': False,
+    'rtc_include_tests': False,
     'target_cpu': _GetTargetCpu(arch),
     'use_goma': use_goma
   }
@@ -133,24 +147,24 @@ def Build(tmp_dir, arch, use_goma, extra_gn_args):
 
   _RunGN(['gen', output_directory, gn_args_str])
 
-  ninja_args = TARGETS
+  ninja_args = TARGETS[:]
   if use_goma:
     ninja_args.extend(['-j', '200'])
   _RunNinja(output_directory, ninja_args)
 
 
-def CollectCommon(aar_file, tmp_dir, arch):
+def CollectCommon(aar_file, build_dir, arch):
   """Collects architecture independent files into the .aar-archive."""
   logging.info('Collecting common files.')
-  output_directory = _GetOutputDirectory(tmp_dir, arch)
+  output_directory = _GetOutputDirectory(build_dir, arch)
   aar_file.write(MANIFEST_FILE, 'AndroidManifest.xml')
   aar_file.write(os.path.join(output_directory, JAR_FILE), 'classes.jar')
 
 
-def Collect(aar_file, tmp_dir, arch):
+def Collect(aar_file, build_dir, arch):
   """Collects architecture specific files into the .aar-archive."""
   logging.info('Collecting: %s', arch)
-  output_directory = _GetOutputDirectory(tmp_dir, arch)
+  output_directory = _GetOutputDirectory(build_dir, arch)
 
   abi_dir = os.path.join('jni', arch)
   for so_file in NEEDED_SO_FILES:
@@ -158,22 +172,39 @@ def Collect(aar_file, tmp_dir, arch):
                    os.path.join(abi_dir, so_file))
 
 
+def GenerateLicenses(output_dir, build_dir, archs):
+  builder = LicenseBuilder(
+      [_GetOutputDirectory(build_dir, arch) for arch in archs], TARGETS)
+  builder.GenerateLicenseText(output_dir)
+
+
+def BuildAar(archs, output_file, use_goma=False, extra_gn_args=None,
+             ext_build_dir=None):
+  extra_gn_args = extra_gn_args or []
+  build_dir = ext_build_dir if ext_build_dir else tempfile.mkdtemp()
+
+  for arch in archs:
+    Build(build_dir, arch, use_goma, extra_gn_args)
+
+  with zipfile.ZipFile(output_file, 'w') as aar_file:
+    # Architecture doesn't matter here, arbitrarily using the first one.
+    CollectCommon(aar_file, build_dir, archs[0])
+    for arch in archs:
+      Collect(aar_file, build_dir, arch)
+
+  license_dir = os.path.dirname(os.path.realpath(output_file))
+  GenerateLicenses(license_dir, build_dir, archs)
+
+  if not ext_build_dir:
+    shutil.rmtree(build_dir, True)
+
+
 def main():
   args = _ParseArgs()
   logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
 
-  tmp_dir = tempfile.mkdtemp()
-
-  for arch in args.arch:
-    Build(tmp_dir, arch, args.use_goma, args.extra_gn_args)
-
-  with zipfile.ZipFile(args.output, 'w') as aar_file:
-    # Architecture doesn't matter here, arbitrarily using the first one.
-    CollectCommon(aar_file, tmp_dir, args.arch[0])
-    for arch in args.arch:
-      Collect(aar_file, tmp_dir, arch)
-
-  shutil.rmtree(tmp_dir, True)
+  BuildAar(args.arch, args.output, args.use_goma, args.extra_gn_args,
+           args.build_dir)
 
 
 if __name__ == '__main__':
